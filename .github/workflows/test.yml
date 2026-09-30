@@ -1,0 +1,31 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # MongoDB 7.0 binaries for mongodb-memory-server are published for Ubuntu 22.04.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    env:
+      MONGOMS_VERSION: 7.0.24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-${{ runner.os }}-${{ env.MONGOMS_VERSION }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
