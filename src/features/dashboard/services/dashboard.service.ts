@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
-import { Lead, Task, Project, Invoice, User, LeadActivity, LeadCategory } from '../../../models/index.js';
+import { Lead, Task, Project, Invoice, User, LeadActivity, LeadCategory, Vendor } from '../../../models/index.js';
+import { ACTIVE_PROJECT_STATUSES, LEGACY_PROJECT_STATUSES } from '../../../shared/constants/os.js';
 
 export class DashboardService {
   async getStats(organizationId: string) {
@@ -26,11 +27,11 @@ export class DashboardService {
     ] = await Promise.all([
       Lead.countDocuments({ organizationId: orgId, isArchived: false }),
       Lead.countDocuments({ organizationId: orgId, isArchived: false, status: { $nin: ['won', 'lost', 'dormant'] } }),
-      Task.countDocuments({ organizationId: orgId }),
-      Task.countDocuments({ organizationId: orgId, status: { $in: ['pending', 'assigned', 'in_progress'] } }),
-      Task.countDocuments({ organizationId: orgId, status: 'completed' }),
-      Project.countDocuments({ organizationId: orgId, status: 'active' }),
-      User.countDocuments({ organizationId: orgId, role: 'client', isActive: true }),
+      Task.countDocuments({ organizationId: orgId, recordStatus: { $ne: 'archived' } }),
+      Task.countDocuments({ organizationId: orgId, recordStatus: { $ne: 'archived' }, status: { $in: ['todo', 'in_progress', 'blocked', 'on_hold', 'pending', 'assigned'] } }),
+      Task.countDocuments({ organizationId: orgId, recordStatus: { $ne: 'archived' }, status: 'completed' }),
+      Project.countDocuments({ organizationId: orgId, recordStatus: { $ne: 'archived' }, status: { $in: [...ACTIVE_PROJECT_STATUSES, ...LEGACY_PROJECT_STATUSES.filter((st) => st !== 'on_hold')] } }),
+      Vendor.countDocuments({ organizationId: orgId, recordStatus: 'active' }),
       this.getRevenue(orgId, startOfMonth, now),
       this.getRevenue(orgId, startOfLastMonth, endOfLastMonth),
       Lead.aggregate([
@@ -53,11 +54,16 @@ export class DashboardService {
         { $group: { _id: '$assignedTo', leadCount: { $sum: 1 }, wonCount: { $sum: { $cond: [{ $eq: ['$status', 'won'] }, 1, 0] } } } },
         { $sort: { wonCount: -1 } },
         { $limit: 5 },
-        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
-        { $unwind: '$user' },
-        { $project: { name: { $concat: ['$user.firstName', ' ', '$user.lastName'] }, leadCount: 1, wonCount: 1, avatar: '$user.avatar' } },
       ]),
     ]);
+
+    const performers = await User.find({ _id: { $in: employeePerformance.map((e) => e._id) } }).select('firstName lastName avatar').lean();
+    const topSalesEmployees = employeePerformance
+      .map((e) => {
+        const u = performers.find((p) => String(p._id) === String(e._id));
+        return u ? { _id: e._id, name: `${u.firstName} ${u.lastName}`, leadCount: e.leadCount, wonCount: e.wonCount, avatar: u.avatar } : null;
+      })
+      .filter(Boolean);
 
     const monthlyGrowth = lastMonthRevenue > 0
       ? ((monthlyRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
@@ -84,7 +90,7 @@ export class DashboardService {
       },
       salesPipeline: leadsByStatus.map((s) => ({ stage: s._id, count: s.count })),
       topServices: topCategories.map((c) => ({ name: c.name, count: c.leadCount, color: c.color })),
-      topSalesEmployees: employeePerformance,
+      topSalesEmployees,
       recentActivities,
       charts: {
         revenue: revenueHistory,
@@ -95,8 +101,8 @@ export class DashboardService {
 
   private async getRevenue(orgId: Types.ObjectId, from: Date, to: Date): Promise<number> {
     const result = await Invoice.aggregate([
-      { $match: { organizationId: orgId, status: 'paid', paidAt: { $gte: from, $lte: to } } },
-      { $group: { _id: null, total: { $sum: '$total' } } },
+      { $match: { organizationId: orgId, recordStatus: 'active', status: { $ne: 'cancelled' }, paymentDate: { $gte: from, $lte: to } } },
+      { $group: { _id: null, total: { $sum: '$amountPaid' } } },
     ]);
     return result[0]?.total || 0;
   }

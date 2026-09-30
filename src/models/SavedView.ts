@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export interface ISavedView extends Document {
   organizationId: Types.ObjectId;
@@ -29,4 +30,4 @@ const savedViewSchema = new Schema<ISavedView>(
   { timestamps: true }
 );
 
-export const SavedView = mongoose.model<ISavedView>('SavedView', savedViewSchema);
+export const SavedView = tenantModel<ISavedView>('SavedView', savedViewSchema);

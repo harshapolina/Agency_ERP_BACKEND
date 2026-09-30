@@ -5,68 +5,82 @@ export type UserRole =
   | 'admin'
   | 'manager'
   | 'sales'
+  | 'project_manager'
+  | 'team_member'
   | 'marketing'
   | 'hr'
   | 'finance'
   | 'operations'
   | 'developer'
+  | 'viewer'
   | 'client';
 
 export const ALL_ROLES: UserRole[] = [
-  'super_admin',
-  'admin',
-  'manager',
-  'sales',
-  'marketing',
-  'hr',
-  'finance',
-  'operations',
-  'developer',
-  'client',
+  'super_admin', 'admin', 'manager', 'sales', 'project_manager', 'team_member',
+  'marketing', 'hr', 'finance', 'operations', 'developer', 'viewer', 'client',
+];
+
+export const COMPANY_ROLES: UserRole[] = ALL_ROLES.filter((r) => r !== 'super_admin' && r !== 'client');
+
+const ADMIN_OPS = [
+  'users:read', 'leads:*', 'conversions:*', 'proposals:*', 'calls:*', 'followups:*',
+  'pipeline:*', 'vendors:*', 'projects:*', 'meetings:*', 'tasks:*', 'documents:*',
+  'milestones:*', 'project_updates:*', 'invoices:*', 'payments:*', 'finance:read',
+  'dashboard:*', 'notifications:*', 'search:read', 'services:read', 'analytics:read',
+  'vault:read', 'vault:write', 'vault:credentials', 'activity:read',
 ];
 
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   super_admin: ['*'],
+  // Company admins own their workspace: everything inside it, including settings, tracker and growth.
   admin: [
-    'users:*', 'leads:*', 'tasks:*', 'projects:*', 'finance:*',
-    'reports:*', 'settings:*', 'categories:*', 'pipeline:*',
-    'notifications:*', 'dashboard:*', 'employees:*',
+    ...ADMIN_OPS, 'users:*', 'finance:*', 'reports:*', 'settings:*', 'categories:*', 'employees:*',
+    'services:*', 'tracker:*', 'growth:*', 'sales_crm:*', 'audit:read',
   ],
   manager: [
-    'leads:*', 'tasks:*', 'projects:read', 'projects:write',
-    'reports:read', 'dashboard:*', 'pipeline:*', 'employees:read',
-    'notifications:*', 'categories:read',
+    'leads:*', 'tasks:*', 'projects:read', 'projects:write', 'reports:read', 'dashboard:*',
+    'pipeline:*', 'employees:read', 'notifications:*', 'categories:read', 'followups:*', 'calls:*',
+    'proposals:*', 'conversions:read', 'vendors:read', 'meetings:*', 'search:read', 'activity:read',
+    'analytics:read', 'vault:read',
   ],
   sales: [
-    'leads:*', 'tasks:read', 'tasks:write', 'pipeline:*',
-    'dashboard:read', 'notifications:read', 'categories:read',
-    'contacts:*', 'companies:*',
+    'leads:*', 'conversions:write', 'proposals:*', 'calls:*', 'followups:*', 'pipeline:*',
+    'vendors:read', 'projects:read', 'meetings:read', 'dashboard:read', 'notifications:read',
+    'search:read', 'services:read', 'analytics:read', 'vault:read', 'vault:write', 'activity:read',
+    'tasks:read', 'tasks:write', 'categories:read', 'contacts:*', 'companies:*',
   ],
-  marketing: [
-    'leads:read', 'dashboard:read', 'reports:read',
-    'campaigns:*', 'notifications:read',
+  project_manager: [
+    'projects:*', 'meetings:*', 'tasks:*', 'documents:*', 'milestones:*', 'project_updates:*',
+    'vendors:read', 'conversions:read', 'leads:read', 'proposals:read', 'followups:read',
+    'dashboard:read', 'notifications:*', 'search:read', 'services:read', 'analytics:read',
+    'vault:read', 'activity:read',
   ],
-  hr: [
-    'employees:*', 'attendance:*', 'leaves:*',
-    'dashboard:read', 'notifications:read',
+  team_member: [
+    'dashboard:read', 'notifications:*', 'projects:read', 'tasks:*', 'meetings:read',
+    'documents:read', 'milestones:read', 'project_updates:read', 'search:read', 'activity:read',
   ],
+  marketing: ['leads:read', 'dashboard:read', 'reports:read', 'campaigns:*', 'notifications:read', 'growth:read'],
+  hr: ['employees:*', 'attendance:*', 'leaves:*', 'dashboard:read', 'notifications:read', 'growth:*'],
   finance: [
-    'finance:*', 'invoices:*', 'payments:*',
-    'dashboard:read', 'reports:read', 'notifications:read',
+    'invoices:*', 'payments:*', 'finance:*', 'vendors:read', 'projects:read', 'conversions:read',
+    'dashboard:read', 'notifications:read', 'search:read', 'analytics:read', 'activity:read', 'reports:read',
   ],
-  operations: [
-    'projects:*', 'tasks:*', 'dashboard:read',
-    'notifications:read', 'leads:read',
+  operations: ['projects:*', 'tasks:*', 'dashboard:read', 'notifications:read', 'leads:read', 'meetings:*', 'documents:*'],
+  developer: ['integrations:*', 'settings:read', 'dashboard:read', 'notifications:read', 'tasks:*', 'projects:read'],
+  viewer: [
+    'leads:read', 'conversions:read', 'proposals:read', 'calls:read', 'followups:read',
+    'vendors:read', 'projects:read', 'milestones:read', 'project_updates:read', 'meetings:read',
+    'tasks:read', 'documents:read', 'invoices:read', 'payments:read', 'dashboard:read',
+    'notifications:read', 'search:read', 'analytics:read', 'services:read', 'finance:read',
+    'vault:read', 'activity:read',
   ],
-  developer: [
-    'integrations:*', 'settings:read', 'dashboard:read',
-    'notifications:read',
-  ],
-  client: [
-    'portal:*', 'projects:read', 'invoices:read',
-    'documents:read', 'notifications:read',
-  ],
+  client: ['portal:*', 'projects:read', 'invoices:read', 'documents:read', 'notifications:read'],
 };
+
+export function permissionsForRole(role: string, extra: string[] = []): string[] {
+  const base = ROLE_PERMISSIONS[role as UserRole] ?? [];
+  return Array.from(new Set([...base, ...extra]));
+}
 
 export interface AuthUser {
   id: string;
@@ -74,6 +88,7 @@ export interface AuthUser {
   role: UserRole;
   organizationId: string;
   permissions: string[];
+  name?: string;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -100,12 +115,19 @@ export interface PaginatedResult<T> {
   };
 }
 
+/**
+ * `*` grants everything; `resource:*` grants any action on the resource; `resource:write` implies
+ * `resource:read`. Needing `*` itself is only satisfied by the `*` grant (platform super admin).
+ */
+export function permissionsAllow(perms: string[], needed: string): boolean {
+  if (perms.includes('*') || perms.includes(needed)) return true;
+  if (needed === '*') return false;
+  const [resource, action] = needed.split(':');
+  if (perms.includes(`${resource}:*`)) return true;
+  if (action === 'read' && perms.includes(`${resource}:write`)) return true;
+  return false;
+}
+
 export function hasPermission(user: AuthUser, permission: string): boolean {
-  if (user.permissions.includes('*')) return true;
-  const [resource, action] = permission.split(':');
-  return user.permissions.some((p) => {
-    if (p === permission) return true;
-    if (p === `${resource}:*`) return true;
-    return false;
-  });
+  return permissionsAllow(user.permissions, permission);
 }

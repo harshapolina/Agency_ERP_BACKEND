@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export interface IProjectRevenueEntry extends Document {
   organizationId: Types.ObjectId;
@@ -27,7 +28,6 @@ const projectRevenueEntrySchema = new Schema<IProjectRevenueEntry>(
 
 projectRevenueEntrySchema.index({ organizationId: 1, projectId: 1, recordedAt: -1 });
 
-export const ProjectRevenueEntry = mongoose.model<IProjectRevenueEntry>(
-  'ProjectRevenueEntry',
+export const ProjectRevenueEntry = tenantModel<IProjectRevenueEntry>('ProjectRevenueEntry',
   projectRevenueEntrySchema
 );

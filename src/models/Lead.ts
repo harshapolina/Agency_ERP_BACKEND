@@ -1,9 +1,12 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
-export type LeadStatus =
-  | 'new' | 'not_contacted' | 'attempt_1' | 'attempt_2' | 'connected'
-  | 'interested' | 'meeting' | 'demo' | 'proposal' | 'negotiation'
-  | 'won' | 'lost' | 'future_follow_up' | 'dormant';
+export const LEAD_STATUSES = [
+  'new', 'contacted', 'qualified', 'not_contacted', 'attempt_1', 'attempt_2', 'connected',
+  'interested', 'meeting', 'demo', 'proposal', 'negotiation', 'converted', 'won', 'lost',
+  'on_hold', 'future_follow_up', 'dormant',
+] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
 export interface ILead extends Document {
   organizationId: Types.ObjectId;
@@ -36,6 +39,15 @@ export interface ILead extends Document {
   estimatedValue?: number;
   currency: string;
   isArchived: boolean;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  industry?: string;
+  sector?: string;
+  interestedServices: string[];
+  requirement?: string;
+  primaryContactId?: Types.ObjectId;
+  referralId?: Types.ObjectId;
+  conversionId?: Types.ObjectId;
+  conversionUuid?: string;
   createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -58,12 +70,16 @@ const leadSchema = new Schema<ILead>(
     state: String,
     country: { type: String, default: 'India' },
     pincode: String,
-    status: {
-      type: String,
-      enum: ['new', 'not_contacted', 'attempt_1', 'attempt_2', 'connected', 'interested', 'meeting', 'demo', 'proposal', 'negotiation', 'won', 'lost', 'future_follow_up', 'dormant'],
-      default: 'new',
-      index: true,
-    },
+    status: { type: String, enum: LEAD_STATUSES, default: 'new', index: true },
+    priority: { type: String, enum: ['low', 'medium', 'high', 'urgent'], default: 'medium' },
+    industry: { type: String, default: '', trim: true },
+    sector: { type: String, default: '', trim: true },
+    interestedServices: { type: [String], default: [] },
+    requirement: { type: String, default: '' },
+    primaryContactId: { type: Schema.Types.ObjectId, ref: 'Contact' },
+    referralId: { type: Schema.Types.ObjectId, ref: 'Referral' },
+    conversionId: { type: Schema.Types.ObjectId, ref: 'Conversion' },
+    conversionUuid: { type: String, default: '' },
     source: String,
     tags: [{ type: String }],
     score: { type: Number, default: 0, min: 0, max: 100 },
@@ -93,4 +109,4 @@ leadSchema.virtual('fullName').get(function () {
   return [this.firstName, this.lastName].filter(Boolean).join(' ');
 });
 
-export const Lead = mongoose.model<ILead>('Lead', leadSchema);
+export const Lead = tenantModel<ILead>('Lead', leadSchema);

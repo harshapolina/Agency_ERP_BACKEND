@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export interface ILeadCategory extends Document {
   organizationId: Types.ObjectId;
@@ -52,4 +53,4 @@ const leadCategorySchema = new Schema<ILeadCategory>(
 
 leadCategorySchema.index({ organizationId: 1, slug: 1 }, { unique: true });
 
-export const LeadCategory = mongoose.model<ILeadCategory>('LeadCategory', leadCategorySchema);
+export const LeadCategory = tenantModel<ILeadCategory>('LeadCategory', leadCategorySchema);

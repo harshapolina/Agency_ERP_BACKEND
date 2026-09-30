@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import { User, Organization, RefreshToken, RegistrationInvite, getPlatformSettings } from '../../../models/index.js';
 import { hashPassword, comparePassword, signAccessToken, signRefreshToken } from '../../../shared/utils/jwt.js';
 import { ConflictError, UnauthorizedError, NotFoundError, ForbiddenError } from '../../../shared/errors/index.js';
-import { ROLE_PERMISSIONS } from '../../../shared/types/index.js';
+import { permissionsForRole } from '../../../shared/types/index.js';
 import type { UserRole } from '../../../shared/types/index.js';
 import { getMaxUsersForPlan } from '../../../shared/constants/plans.js';
 
@@ -81,7 +81,7 @@ export class AuthService {
       firstName: data.firstName,
       lastName: data.lastName,
       role: 'admin' as UserRole,
-      permissions: ROLE_PERMISSIONS.admin,
+      permissions: [],
     });
 
     if (invite) {
@@ -184,13 +184,13 @@ export class AuthService {
   }
 
   private async generateTokens(user: InstanceType<typeof User>) {
-    const permissions = user.permissions.length ? user.permissions : ROLE_PERMISSIONS[user.role];
     const payload = {
       id: user._id.toString(),
       email: user.email,
+      name: `${user.firstName} ${user.lastName}`.trim(),
       role: user.role,
       organizationId: user.organizationId.toString(),
-      permissions,
+      permissions: user.permissions ?? [],
     };
 
     const accessToken = signAccessToken(payload);
@@ -220,7 +220,7 @@ export class AuthService {
       role: user.role,
       department: user.department,
       organizationId: user.organizationId.toString(),
-      permissions: user.permissions.length ? user.permissions : ROLE_PERMISSIONS[user.role],
+      permissions: permissionsForRole(user.role, user.permissions ?? []),
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
     };

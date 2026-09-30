@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export interface IAutomationRule extends Document {
   organizationId: Types.ObjectId;
@@ -23,4 +24,4 @@ const automationRuleSchema = new Schema<IAutomationRule>(
   { timestamps: true }
 );
 
-export const AutomationRule = mongoose.model<IAutomationRule>('AutomationRule', automationRuleSchema);
+export const AutomationRule = tenantModel<IAutomationRule>('AutomationRule', automationRuleSchema);

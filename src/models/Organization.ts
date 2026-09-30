@@ -17,6 +17,18 @@ export interface IOrganization extends Document {
     dateFormat: string;
     fiscalYearStart: number;
   };
+  database?: {
+    enabled: boolean;
+    uriCipher?: string;
+    uriIv?: string;
+    uriTag?: string;
+    dbName?: string;
+    hint?: string;
+    status?: 'unconfigured' | 'connected' | 'error';
+    lastCheckedAt?: Date;
+    lastError?: string;
+    updatedBy?: string;
+  };
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -38,6 +50,18 @@ const organizationSchema = new Schema<IOrganization>(
       currency: { type: String, default: 'INR' },
       dateFormat: { type: String, default: 'DD/MM/YYYY' },
       fiscalYearStart: { type: Number, default: 4 },
+    },
+    database: {
+      enabled: { type: Boolean, default: false },
+      uriCipher: { type: String, select: false },
+      uriIv: { type: String, select: false },
+      uriTag: { type: String, select: false },
+      dbName: { type: String, default: '' },
+      hint: { type: String, default: '' },
+      status: { type: String, enum: ['unconfigured', 'connected', 'error'], default: 'unconfigured' },
+      lastCheckedAt: Date,
+      lastError: { type: String, default: '' },
+      updatedBy: { type: String, default: '' },
     },
     isActive: { type: Boolean, default: true },
   },

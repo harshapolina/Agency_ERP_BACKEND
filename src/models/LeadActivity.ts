@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export type LeadActivityType = 'call' | 'email' | 'meeting' | 'whatsapp' | 'note' | 'status_change' | 'assignment' | 'document' | 'proposal' | 'invoice';
 
@@ -30,4 +31,4 @@ const leadActivitySchema = new Schema<ILeadActivity>({
 
 leadActivitySchema.index({ leadId: 1, createdAt: -1 });
 
-export const LeadActivity = mongoose.model<ILeadActivity>('LeadActivity', leadActivitySchema);
+export const LeadActivity = tenantModel<ILeadActivity>('LeadActivity', leadActivitySchema);

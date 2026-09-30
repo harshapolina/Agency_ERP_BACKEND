@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { COMPANY_ROLES, type UserRole } from '../../../shared/types/index.js';
 import { z } from 'zod';
 import { userController } from '../controllers/user.controller.js';
 import { authenticate, authorize } from '../../../shared/middleware/auth.js';
@@ -20,14 +21,14 @@ const createSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   phone: z.string().optional(),
-  role: z.enum(['admin', 'manager', 'sales', 'marketing', 'hr', 'finance', 'operations', 'developer']).optional(),
+  role: z.enum(COMPANY_ROLES as [UserRole, ...UserRole[]]).optional(),
   department: z.string().optional(),
 });
 const updateSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   phone: z.string().optional(),
-  role: z.enum(['admin', 'manager', 'sales', 'marketing', 'hr', 'finance', 'operations', 'developer']).optional(),
+  role: z.enum(COMPANY_ROLES as [UserRole, ...UserRole[]]).optional(),
   department: z.string().optional(),
 });
 

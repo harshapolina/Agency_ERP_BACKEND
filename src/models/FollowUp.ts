@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export type FollowUpType = 'phone' | 'whatsapp' | 'email' | 'meeting' | 'visit' | 'demo' | 'proposal' | 'renewal' | 'payment_reminder';
 export type FollowUpStatus = 'scheduled' | 'completed' | 'missed' | 'cancelled' | 'escalated';
@@ -42,4 +43,4 @@ const followUpSchema = new Schema<IFollowUp>(
 
 followUpSchema.index({ organizationId: 1, assignedTo: 1, scheduledAt: 1, status: 1 });
 
-export const FollowUp = mongoose.model<IFollowUp>('FollowUp', followUpSchema);
+export const FollowUp = tenantModel<IFollowUp>('FollowUp', followUpSchema);

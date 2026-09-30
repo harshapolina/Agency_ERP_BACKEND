@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export interface ICompany extends Document {
   organizationId: Types.ObjectId;
@@ -9,6 +10,7 @@ export interface ICompany extends Document {
   email?: string;
   phone?: string;
   address?: string;
+  gstNumber?: string;
   city?: string;
   state?: string;
   country?: string;
@@ -30,6 +32,7 @@ const companySchema = new Schema<ICompany>(
     email: { type: String, lowercase: true },
     phone: String,
     address: String,
+    gstNumber: String,
     city: String,
     state: String,
     country: { type: String, default: 'India' },
@@ -43,4 +46,4 @@ const companySchema = new Schema<ICompany>(
 
 companySchema.index({ organizationId: 1, name: 1 });
 
-export const Company = mongoose.model<ICompany>('Company', companySchema);
+export const Company = tenantModel<ICompany>('Company', companySchema);

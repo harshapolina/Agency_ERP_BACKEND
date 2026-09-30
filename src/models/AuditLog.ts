@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export interface IAuditLog extends Document {
   organizationId: Types.ObjectId;
@@ -27,4 +28,4 @@ const auditLogSchema = new Schema<IAuditLog>({
 auditLogSchema.index({ organizationId: 1, createdAt: -1 });
 auditLogSchema.index({ entityType: 1, entityId: 1 });
 
-export const AuditLog = mongoose.model<IAuditLog>('AuditLog', auditLogSchema);
+export const AuditLog = tenantModel<IAuditLog>('AuditLog', auditLogSchema);

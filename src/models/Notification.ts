@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export type NotificationType =
   | 'task_assigned' | 'task_updated' | 'task_completed'
@@ -43,4 +44,4 @@ const notificationSchema = new Schema<INotification>({
 
 notificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
 
-export const Notification = mongoose.model<INotification>('Notification', notificationSchema);
+export const Notification = tenantModel<INotification>('Notification', notificationSchema);

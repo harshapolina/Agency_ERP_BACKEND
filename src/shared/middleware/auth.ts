@@ -1,7 +1,8 @@
 import { Response, NextFunction } from 'express';
 import { UnauthorizedError, ForbiddenError } from '../errors/index.js';
 import { verifyAccessToken } from '../utils/jwt.js';
-import { AuthenticatedRequest, hasPermission } from '../types/index.js';
+import { AuthenticatedRequest, hasPermission, permissionsForRole } from '../types/index.js';
+import { connectionForOrganization, tenantStorage } from '../../config/tenant.js';
 
 export function authenticate(req: AuthenticatedRequest, _res: Response, next: NextFunction) {
   const header = req.headers.authorization;
@@ -10,12 +11,17 @@ export function authenticate(req: AuthenticatedRequest, _res: Response, next: Ne
   }
 
   try {
-    const token = header.slice(7);
-    req.user = verifyAccessToken(token);
-    next();
+    const payload = verifyAccessToken(header.slice(7));
+    // Permissions come from the role at request time so matrix changes apply without re-login.
+    req.user = { ...payload, permissions: permissionsForRole(payload.role, payload.permissions ?? []) };
   } catch {
-    next(new UnauthorizedError('Invalid or expired access token'));
+    return next(new UnauthorizedError('Invalid or expired access token'));
   }
+
+  const organizationId = req.user.organizationId;
+  connectionForOrganization(organizationId)
+    .then((connection) => tenantStorage.run({ organizationId, connection }, () => next()))
+    .catch(next);
 }
 
 export function authorize(...permissions: string[]) {

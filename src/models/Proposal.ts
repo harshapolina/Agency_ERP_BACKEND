@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export type ProposalStatus = 'draft' | 'sent' | 'viewed' | 'accepted' | 'rejected' | 'expired';
 
@@ -50,4 +51,4 @@ const proposalSchema = new Schema<IProposal>(
   { timestamps: true }
 );
 
-export const Proposal = mongoose.model<IProposal>('Proposal', proposalSchema);
+export const Proposal = tenantModel<IProposal>('Proposal', proposalSchema);

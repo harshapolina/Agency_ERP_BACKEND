@@ -1,8 +1,10 @@
 import { Router } from 'express';
+import { COMPANY_ROLES, type UserRole } from '../../../shared/types/index.js';
 import { z } from 'zod';
 import { adminController } from '../controllers/admin.controller.js';
 import { authenticate, authorizeRoles } from '../../../shared/middleware/auth.js';
 import { validateBody } from '../../../shared/middleware/validate.js';
+import { organizationDatabaseRoutes } from './database.routes.js';
 
 const router = Router();
 
@@ -54,13 +56,13 @@ const createCompanyUserSchema = z.object({
   password: z.string().min(8),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
-  role: z.enum(['admin', 'manager', 'sales', 'marketing', 'hr', 'finance', 'operations', 'developer']).optional(),
+  role: z.enum(COMPANY_ROLES as [UserRole, ...UserRole[]]).optional(),
   department: z.string().optional(),
 });
 
 const updateCompanyUserSchema = z.object({
   password: z.string().min(8).optional(),
-  role: z.enum(['admin', 'manager', 'sales', 'marketing', 'hr', 'finance', 'operations', 'developer']).optional(),
+  role: z.enum(COMPANY_ROLES as [UserRole, ...UserRole[]]).optional(),
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   isActive: z.boolean().optional(),
@@ -76,6 +78,7 @@ router.get('/organizations', adminController.listOrganizations.bind(adminControl
 router.get('/organizations/:id', adminController.getOrganization.bind(adminController));
 router.post('/organizations', validateBody(createOrgSchema), adminController.createOrganization.bind(adminController));
 router.patch('/organizations/:id', validateBody(updateOrgSchema), adminController.updateOrganization.bind(adminController));
+router.use('/organizations/:id/database', organizationDatabaseRoutes);
 router.get('/organizations/:id/users', adminController.listOrganizationUsers.bind(adminController));
 router.post('/organizations/:id/users', validateBody(createCompanyUserSchema), adminController.createOrganizationUser.bind(adminController));
 router.patch('/organizations/:id/users/:userId', validateBody(updateCompanyUserSchema), adminController.updateOrganizationUser.bind(adminController));

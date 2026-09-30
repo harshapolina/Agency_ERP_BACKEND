@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export type CallOutcome =
   | 'connected' | 'busy' | 'no_answer' | 'switched_off'
@@ -36,4 +37,4 @@ const callLogSchema = new Schema<ICallLog>({
 
 callLogSchema.index({ organizationId: 1, callerId: 1, createdAt: -1 });
 
-export const CallLog = mongoose.model<ICallLog>('CallLog', callLogSchema);
+export const CallLog = tenantModel<ICallLog>('CallLog', callLogSchema);

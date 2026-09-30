@@ -3,10 +3,8 @@ import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
 import type { AuthUser } from '../types/index.js';
 
-const SALT_ROUNDS = 12;
-
 export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, SALT_ROUNDS);
+  return bcrypt.hash(password, env.BCRYPT_ROUNDS);
 }
 
 export async function comparePassword(password: string, hash: string): Promise<boolean> {

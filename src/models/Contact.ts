@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export interface IContact extends Document {
   organizationId: Types.ObjectId;
@@ -31,4 +32,4 @@ const contactSchema = new Schema<IContact>(
   { timestamps: true }
 );
 
-export const Contact = mongoose.model<IContact>('Contact', contactSchema);
+export const Contact = tenantModel<IContact>('Contact', contactSchema);

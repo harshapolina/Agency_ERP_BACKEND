@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export type ExpenseCategory =
   | 'marketing' | 'salaries' | 'software' | 'office' | 'travel' | 'utilities' | 'other';
@@ -45,4 +46,4 @@ const expenseSchema = new Schema<IExpense>(
 expenseSchema.index({ organizationId: 1, referenceNumber: 1 }, { unique: true });
 expenseSchema.index({ organizationId: 1, spentAt: -1 });
 
-export const Expense = mongoose.model<IExpense>('Expense', expenseSchema);
+export const Expense = tenantModel<IExpense>('Expense', expenseSchema);

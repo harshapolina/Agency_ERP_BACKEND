@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
-import type { UserRole } from '../shared/types/index.js';
+import { ALL_ROLES, type UserRole } from '../shared/types/index.js';
 
 export interface IUser extends Document {
   organizationId: Types.ObjectId;
@@ -29,7 +29,7 @@ const userSchema = new Schema<IUser>(
     phone: String,
     role: {
       type: String,
-      enum: ['super_admin', 'admin', 'manager', 'sales', 'marketing', 'hr', 'finance', 'operations', 'developer', 'client'],
+      enum: ALL_ROLES,
       default: 'sales',
     },
     department: String,

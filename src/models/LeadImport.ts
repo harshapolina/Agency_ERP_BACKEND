@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { tenantModel } from '../config/tenant.js';
 
 export type ImportStatus = 'pending' | 'mapping' | 'previewing' | 'processing' | 'completed' | 'failed';
 export type ImportSource = 'csv' | 'excel' | 'manual' | 'bulk_text' | 'google_sheets' | 'api';
@@ -48,4 +49,4 @@ const leadImportSchema = new Schema<ILeadImport>(
   { timestamps: true }
 );
 
-export const LeadImport = mongoose.model<ILeadImport>('LeadImport', leadImportSchema);
+export const LeadImport = tenantModel<ILeadImport>('LeadImport', leadImportSchema);
