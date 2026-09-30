@@ -3,6 +3,8 @@ import { ActivityEvent, FieldAuditLog, Notification, User } from '../../models/i
 import type { AuthUser } from '../types/index.js';
 import { sendNotificationEmail } from '../utils/mailer.js';
 import { logger } from '../logger/index.js';
+import type { NotificationCategory } from '../constants/os.js';
+import { notificationRecipients } from './company.js';
 
 export interface Actor {
   organizationId: string;
@@ -58,6 +60,8 @@ export interface NotifyInput {
   recipientRoles?: string[];
   excludeUserId?: string;
   email?: boolean;
+  /** Also emails the addresses the company configured for this category in Settings. */
+  emailCategory?: NotificationCategory;
 }
 
 /**
@@ -76,6 +80,12 @@ export async function notifyStaff(organizationId: string, input: NotifyInput) {
     if (or.length) filter.$or = or;
     let recipients = await User.find(filter).select('_id email').lean();
     if (input.excludeUserId) recipients = recipients.filter((r) => r._id.toString() !== input.excludeUserId);
+
+    if (input.emailCategory) {
+      const emailed = new Set(input.email === false ? [] : recipients.map((r) => r.email.toLowerCase()));
+      const extra = (await notificationRecipients(organizationId, input.emailCategory)).filter((e) => !emailed.has(e));
+      await Promise.all(extra.map((e) => sendNotificationEmail(e, { title: input.title, body: input.body, href: input.href })));
+    }
     if (!recipients.length) return 0;
 
     await Notification.insertMany(

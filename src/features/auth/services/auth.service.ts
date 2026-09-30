@@ -91,7 +91,7 @@ export class AuthService {
     }
 
     const tokens = await this.generateTokens(user);
-    return { user: this.sanitizeUser(user), organization, ...tokens };
+    return { user: this.sanitizeUser(user), organization: this.sessionOrganization(organization), ...tokens };
   }
 
   async companyLogin(email: string, password: string) {
@@ -114,7 +114,7 @@ export class AuthService {
     await user.save();
 
     const tokens = await this.generateTokens(user);
-    return { user: this.sanitizeUser(user), organization, ...tokens };
+    return { user: this.sanitizeUser(user), organization: this.sessionOrganization(organization), ...tokens };
   }
 
   async adminLogin(email: string, password: string) {
@@ -134,7 +134,7 @@ export class AuthService {
     await user.save();
 
     const tokens = await this.generateTokens(user);
-    return { user: this.sanitizeUser(user), organization, ...tokens };
+    return { user: this.sanitizeUser(user), organization: this.sessionOrganization(organization), ...tokens };
   }
 
   async login(email: string, password: string) {
@@ -160,9 +160,10 @@ export class AuthService {
   }
 
   async getProfile(userId: string) {
-    const user = await User.findById(userId).populate('organizationId', 'name slug logo settings');
+    const user = await User.findById(userId);
     if (!user) throw new NotFoundError('User');
-    return this.sanitizeUser(user);
+    const organization = await Organization.findById(user.organizationId).select('name slug logo settings').lean();
+    return { ...this.sanitizeUser(user), organization: this.sessionOrganization(organization) };
   }
 
   async updateProfile(userId: string, data: { firstName?: string; lastName?: string; phone?: string; avatar?: string }) {
@@ -206,6 +207,12 @@ export class AuthService {
     });
 
     return { accessToken, refreshToken };
+  }
+
+  /** Only what the client needs to brand the app; profile and bank details stay behind `/settings`. */
+  private sessionOrganization(org: { _id: unknown; name: string; slug: string; logo?: string; settings?: unknown } | null) {
+    if (!org) return null;
+    return { id: String(org._id), name: org.name, slug: org.slug, logo: org.logo || '', settings: org.settings };
   }
 
   private sanitizeUser(user: InstanceType<typeof User>) {

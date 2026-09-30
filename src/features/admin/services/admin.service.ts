@@ -160,6 +160,7 @@ export class AdminService {
       name: string;
       industry?: string;
       website?: string;
+      logo?: string;
       adminEmail: string;
       adminPassword: string;
       adminFirstName: string;
@@ -184,6 +185,7 @@ export class AdminService {
       slug,
       industry: data.industry,
       website: data.website,
+      logo: data.logo || undefined,
       subscriptionPlan: plan,
       maxUsers,
       planStartedAt: new Date(),

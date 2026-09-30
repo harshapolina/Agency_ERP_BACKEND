@@ -3,8 +3,8 @@ import { TrackerRow, Task, RecurringPayment, ReminderLog, User, Invoice } from '
 import { TRACKER_DONE_STATUSES, TRACKER_PRIORITY_RANK } from '../../../shared/constants/os.js';
 import { sendNotificationEmail } from '../../../shared/utils/mailer.js';
 import { notifyStaff } from '../../../shared/os/activity.js';
+import { notificationRecipients } from '../../../shared/os/company.js';
 import { displayInvoiceStatus, outstandingOf } from '../../../shared/os/money.js';
-import { env } from '../../../config/env.js';
 import type { OsDoc } from '../../../models/os/base.js';
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
@@ -71,12 +71,14 @@ export async function runDailyReminders(organizationId: string, slot: 'morning' 
   const tomorrowEnd = new Date(todayStart.getTime() + 2 * DAY);
   const soonEnd = new Date(todayStart.getTime() + 4 * DAY);
 
-  const [users, rows, tasks, recurring] = await Promise.all([
+  const [users, rows, tasks, recurring, financeList] = await Promise.all([
     User.find({ organizationId: org, isActive: true }).select('_id email firstName lastName role').lean(),
     TrackerRow.find({ organizationId: org, recordStatus: 'active', status: { $nin: TRACKER_DONE_STATUSES } }).lean(),
     Task.find({ organizationId: org, recordStatus: { $ne: 'archived' }, status: { $nin: ['completed', 'cancelled'] }, assignedTo: { $exists: true }, dueDate: { $lt: todayEnd } }).lean(),
     RecurringPayment.find({ organizationId: org, recordStatus: 'active', status: 'active', nextDueAt: { $lt: slot === 'morning' ? soonEnd : tomorrowEnd } }).sort({ nextDueAt: 1 }).lean(),
+    notificationRecipients(organizationId, 'finance'),
   ]);
+  const financeEmails = new Set(financeList);
 
   let sent = 0;
   for (const user of users) {
@@ -98,7 +100,7 @@ export async function runDailyReminders(organizationId: string, slot: 'morning' 
     add('Overdue tasks', myTasks.filter((t) => t.dueDate && new Date(t.dueDate) < todayStart).map((t) => `${t.title} · was due ${formatIst(t.dueDate)}`));
     add('Tasks due today', myTasks.filter((t) => t.dueDate && new Date(t.dueDate) >= todayStart).map((t) => t.title));
 
-    const isFinance = ['finance', 'admin'].includes(user.role) || env.FINANCE_ALERT_EMAILS.split(',').map((e) => e.trim().toLowerCase()).includes(user.email);
+    const isFinance = ['finance', 'admin'].includes(user.role) || financeEmails.has(user.email.toLowerCase());
     if (isFinance && recurring.length) {
       add('Recurring payments due', recurring.map((r) => `${r.title}${r.payee ? ` (${r.payee})` : ''} · ₹${Number(r.amount).toLocaleString('en-IN')} · ${new Date(r.nextDueAt) < todayStart ? 'OVERDUE since' : 'due'} ${formatIst(r.nextDueAt)}`));
     }
@@ -186,7 +188,7 @@ export async function recurringPaymentReminders(organizationId: string) {
   const due = await RecurringPayment.find({ organizationId, recordStatus: 'active', status: 'active', nextDueAt: { $lte: soon } }).sort({ nextDueAt: 1 }).lean();
   if (!due.length) return 0;
   const body = due.slice(0, 8).map((r) => `${r.title}: ₹${Number(r.amount).toLocaleString('en-IN')} · ${formatIst(r.nextDueAt)}`).join(' · ');
-  await notifyStaff(organizationId, { type: 'recurring_payment', title: `Recurring payments due (${due.length})`, body, href: '/recurring-payments', recipientRoles: ['finance', 'admin'] });
+  await notifyStaff(organizationId, { type: 'recurring_payment', title: `Recurring payments due (${due.length})`, body, href: '/recurring-payments', recipientRoles: ['finance', 'admin'], emailCategory: 'finance' });
   await RecurringPayment.updateMany({ _id: { $in: due.map((d) => d._id) } }, { $set: { lastRemindedAt: new Date() } });
   return due.length;
 }

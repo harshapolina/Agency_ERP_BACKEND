@@ -220,7 +220,7 @@ export async function convertLead(actor: Actor, leadId: string, input: ConvertLe
   await notifyStaff(actor.organizationId, {
     type: 'conversion', title: 'Conversion completed', body: `${companyName} → ${conversion!.publicCode}`,
     href: `/conversions/${conversion!.publicCode}`, entityType: 'conversion', entityId: String(conversion!._id),
-    excludeUserId: actor.userId,
+    excludeUserId: actor.userId, emailCategory: 'sales',
   });
 
   if (lead.referralId) {

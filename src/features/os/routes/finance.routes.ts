@@ -17,9 +17,8 @@ import {
   RECURRING_PAYMENT_STATUSES,
 } from '../../../shared/constants/os.js';
 import { sendNotificationEmail, sendMail, renderNotificationEmail } from '../../../shared/utils/mailer.js';
-import { env } from '../../../config/env.js';
 import { ensurePortalActive } from '../services/portal.service.js';
-import { companyProfile } from '../../../shared/os/company.js';
+import { COMPANY_SELECT, companyProfile, loadCompany, notificationRecipients } from '../../../shared/os/company.js';
 import { Organization } from '../../../models/Organization.js';
 import type { OsDoc } from '../../../models/os/base.js';
 
@@ -27,7 +26,7 @@ const inr = (n: number) => `₹${Math.round(n || 0).toLocaleString('en-IN')}`;
 const fmtDate = (d?: Date | string | null) => (d ? new Date(d).toISOString().slice(0, 10) : '—');
 
 async function sendFinanceAlert(input: { title: string; lines: [string, unknown][]; actor: Actor; changes?: { field: string; from: string; to: string }[]; eyebrow: string; href: string }) {
-  const to = env.FINANCE_ALERT_EMAILS.split(',').map((e) => e.trim()).filter(Boolean);
+  const to = await notificationRecipients(input.actor.organizationId, 'finance');
   if (!to.length) return;
   const lines = input.lines.filter(([, v]) => v !== undefined && v !== null && String(v) !== '').map(([k, v]) => `${k}: ${v}`);
   if (input.changes?.length) lines.push(...input.changes.map((c) => `Changed ${c.field}: ${c.from || '—'} → ${c.to || '—'}`));
@@ -167,8 +166,7 @@ invoiceRoutes.get(
   '/company',
   authorize('invoices:read'),
   route(async (req) => {
-    const org = await Organization.findById(req.user!.organizationId).select('name').lean();
-    return companyProfile(org?.name);
+    return companyProfile(await loadCompany(req.user!.organizationId));
   })
 );
 
@@ -182,9 +180,9 @@ invoiceRoutes.get(
     const [payments, vendor, org] = await Promise.all([
       Payment.find({ invoiceId: invoice._id, recordStatus: 'active' }).sort({ paidAt: -1 }).lean(),
       invoice.vendorId ? Vendor.findById(invoice.vendorId).select('companyName email').lean() : null,
-      Organization.findById(req.user!.organizationId).select('name').lean(),
+      Organization.findById(req.user!.organizationId).select(COMPANY_SELECT).lean(),
     ]);
-    return { invoice: withDisplayStatus(invoice), payments, vendor, company: companyProfile(org?.name), amountInWords: numberToWordsINR(invoice.total) };
+    return { invoice: withDisplayStatus(invoice), payments, vendor, company: companyProfile(org), amountInWords: numberToWordsINR(invoice.total) };
   })
 );
 
@@ -271,14 +269,15 @@ invoiceRoutes.post(
     }
     const portal = await ensurePortalActive(actor, invoice.conversionUuid);
     const clientName = (invoice.billToName || vendor?.companyName || 'there').split(/\s+/)[0];
+    const sender = companyProfile(await loadCompany(actor.organizationId)).fromName;
     const html = renderNotificationEmail({
-      eyebrow: 'Editco Media',
+      eyebrow: sender,
       title: `Invoice ${invoice.invoiceNumber}`,
       body: `Hi ${clientName},\n\nYour invoice ${invoice.invoiceNumber} for ${inr(invoice.total)} is ready to view in your client portal.\nYou can open it anytime to track status and download a PDF.`,
       href: `${portal.url}/invoices/${invoice._id}`,
       ctaLabel: 'View invoice',
     });
-    const sent = await sendMail(to, `Invoice ${invoice.invoiceNumber} from Editco Media`, html);
+    const sent = await sendMail(to, `Invoice ${invoice.invoiceNumber} from ${sender}`, html);
     if (!sent) throw new ValidationError('Failed to send email — check the SMTP settings');
     await logActivity(actor, { title: 'Invoice shared by email', detail: `${invoice.invoiceNumber} → ${to}`, entityType: 'invoice', entityId: String(invoice._id), conversionUuid: invoice.conversionUuid });
     return { message: `Invoice link sent to ${to}` };
@@ -320,7 +319,7 @@ const clientPaymentSchema = z.object({
 
 async function afterPayment(actor: Actor, payment: OsDoc, invoiceNumber: string, href: string, body: string) {
   await logActivity(actor, { title: 'Payment recorded', detail: `${inr(payment.amount)} on ${invoiceNumber}`, entityType: 'payment', entityId: String(payment._id), conversionUuid: payment.conversionUuid, projectId: payment.projectId ? String(payment.projectId) : undefined });
-  await notifyStaff(actor.organizationId, { type: 'invoice', title: 'Payment received', body, href, recipientRoles: ['finance'], excludeUserId: actor.userId });
+  await notifyStaff(actor.organizationId, { type: 'invoice', title: 'Payment received', body, href, recipientRoles: ['finance'], excludeUserId: actor.userId, emailCategory: 'finance' });
 }
 
 export const paymentRoutes = Router();
@@ -453,7 +452,7 @@ const recurringSchema = z.object({
 });
 
 async function alertRecurring(actor: Actor, title: string, body: string, entityId: string) {
-  await notifyStaff(actor.organizationId, { type: 'recurring_payment', title, body, href: '/recurring-payments', recipientRoles: ['finance', 'admin'] });
+  await notifyStaff(actor.organizationId, { type: 'recurring_payment', title, body, href: '/recurring-payments', recipientRoles: ['finance', 'admin'], emailCategory: 'finance' });
   await logActivity(actor, { title, detail: body, entityType: 'recurring_payment', entityId });
 }
 

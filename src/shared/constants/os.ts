@@ -134,3 +134,13 @@ export const SALES_ADMIN_ONLY_MODULES = [
   'analytics.lead_source', 'analytics.lost_deals', 'reports.reports', 'reports.export', 'admin.teams',
   'admin.territories', 'admin.audit_logs',
 ];
+
+/** Extra addresses a company can route its notification emails to, on top of the users who already receive them. */
+export const NOTIFICATION_CATEGORIES = ['finance', 'sales', 'careers', 'referrals', 'ega', 'alerts'] as const;
+export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
+
+export const COMPANY_PROFILE_FIELDS = [
+  'legalName', 'address', 'email', 'phone', 'gst', 'pan', 'cin', 'state', 'stateCode', 'jurisdiction',
+  'bankName', 'bankAccountName', 'bankAccountNumber', 'bankIfsc', 'bankAccountType', 'bankUpi',
+] as const;
+export type CompanyProfileField = (typeof COMPANY_PROFILE_FIELDS)[number];

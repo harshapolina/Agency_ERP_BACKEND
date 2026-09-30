@@ -788,7 +788,7 @@ salesCrmRoutes.post('/approvals', needModule('admin.approvals') as never, route(
   const approval = await SalesApproval.create({ ...b, dealId: b.dealId || undefined, requesterEmployeeId: ctx(req).employeeId, status: 'pending', organizationId: orgOf(req), createdBy: req.user!.email });
   await logSales(req, 'approval_requested', `Approval requested (${b.type})`, { dealId: approval.dealId });
   const admins = await SalesEmployee.find({ organizationId: orgOf(req), isSalesAdmin: true, status: 'active' }).select('userId').lean();
-  await notifyStaff(orgOf(req), { type: 'sales_approval', title: `Approval requested (${b.type})`, body: b.reason || '', href: '/sales-crm/approvals', recipientUserIds: admins.map((a) => String(a.userId)) });
+  await notifyStaff(orgOf(req), { type: 'sales_approval', title: `Approval requested (${b.type})`, body: b.reason || '', href: '/sales-crm/approvals', recipientUserIds: admins.map((a) => String(a.userId)), emailCategory: 'sales' });
   res.status(201);
   return approval;
 }));

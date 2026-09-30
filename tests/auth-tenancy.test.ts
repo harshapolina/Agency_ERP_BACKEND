@@ -17,6 +17,16 @@ describe('auth', () => {
     expect(me.email ?? me.user?.email).toBe(CREDS.admin.email);
   });
 
+  it('only shares branding, never invoice or bank details, with the session', async () => {
+    await admin.ok(admin.put('/settings/company', { profile: { bankAccountNumber: '1234567890' } }));
+    const login = await t.api.ok(t.api.post('/auth/login', CREDS.admin));
+    const me = await admin.ok(admin.get('/auth/me'));
+    for (const org of [login.organization, me.organization]) {
+      expect(Object.keys(org).sort()).toEqual(['id', 'logo', 'name', 'settings', 'slug']);
+    }
+    expect(me.organizationId).toBe(me.organization.id);
+  });
+
   it('rejects a wrong password and unauthenticated calls', async () => {
     const bad = await t.api.post('/auth/login', { email: CREDS.admin.email, password: 'wrong-password' });
     expect(bad.status).toBe(401);

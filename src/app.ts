@@ -39,6 +39,7 @@ import {
 import { salesCrmRoutes } from './features/os/routes/salescrm.routes.js';
 import { publicRoutes } from './features/os/routes/public.routes.js';
 import { cronRoutes } from './features/os/routes/cron.routes.js';
+import { settingsRoutes } from './features/os/routes/settings.routes.js';
 
 const app = express();
 
@@ -121,6 +122,7 @@ v1.use('/growth/newsletter', newsletterRoutes);
 v1.use('/sales-crm', salesCrmRoutes);
 v1.use('/public/:orgSlug', publicRoutes);
 v1.use('/cron', cronRoutes);
+v1.use('/settings', settingsRoutes);
 
 app.use('/api/v1', v1);
 app.use(notFoundHandler);

@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import type { SubscriptionPlan } from '../shared/constants/plans.js';
+import { COMPANY_PROFILE_FIELDS, NOTIFICATION_CATEGORIES, type CompanyProfileField, type NotificationCategory } from '../shared/constants/os.js';
 
 export interface IOrganization extends Document {
   name: string;
@@ -17,6 +18,8 @@ export interface IOrganization extends Document {
     dateFormat: string;
     fiscalYearStart: number;
   };
+  profile?: Partial<Record<CompanyProfileField, string>>;
+  notificationEmails?: Partial<Record<NotificationCategory, string[]>>;
   database?: {
     enabled: boolean;
     uriCipher?: string;
@@ -51,6 +54,8 @@ const organizationSchema = new Schema<IOrganization>(
       dateFormat: { type: String, default: 'DD/MM/YYYY' },
       fiscalYearStart: { type: Number, default: 4 },
     },
+    profile: Object.fromEntries(COMPANY_PROFILE_FIELDS.map((f) => [f, { type: String, default: '' }])),
+    notificationEmails: Object.fromEntries(NOTIFICATION_CATEGORIES.map((c) => [c, { type: [String], default: [] }])),
     database: {
       enabled: { type: Boolean, default: false },
       uriCipher: { type: String, select: false },

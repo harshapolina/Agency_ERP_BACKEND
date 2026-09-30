@@ -12,7 +12,7 @@ import { notifyStaff } from '../../../shared/os/activity.js';
 import { NotFoundError, ValidationError } from '../../../shared/errors/index.js';
 import { sha256Hex } from '../../../shared/utils/crypto.js';
 import { withDisplayStatus, numberToWordsINR } from '../../../shared/os/money.js';
-import { companyProfile } from '../../../shared/os/company.js';
+import { companyProfile, type CompanyRecord } from '../../../shared/os/company.js';
 import { ACTIVE_PROJECT_STATUSES, normalizeProjectStatus } from '../../../shared/constants/os.js';
 import { conversionRollup } from '../services/conversion.service.js';
 import { createUniqueReferralCode, computeEGAScore } from '../services/referral.service.js';
@@ -22,13 +22,13 @@ export const publicRoutes = Router({ mergeParams: true });
 publicRoutes.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
 
 async function orgFrom(req: Request) {
-  const org = await Organization.findOne({ slug: String(req.params.orgSlug || '').toLowerCase(), isActive: true }).select('_id name slug').lean();
+  const org = await Organization.findOne({ slug: String(req.params.orgSlug || '').toLowerCase(), isActive: true }).select('_id name slug logo profile').lean();
   if (!org) throw new NotFoundError('Organization');
   return org;
 }
 
 /** Resolves the org from the URL slug and runs `fn` against that org's database. */
-function inOrg<T>(fn: (req: Request, organizationId: string, org: { name: string; slug: string }) => Promise<T>) {
+function inOrg<T>(fn: (req: Request, organizationId: string, org: { name: string; slug: string } & CompanyRecord) => Promise<T>) {
   return route(async (req) => {
     const org = await orgFrom(req);
     const organizationId = String(org._id);
@@ -70,7 +70,7 @@ publicRoutes.get(
     ]);
     const milestones = await Milestone.find({ organizationId, projectId: { $in: projects.map((p) => p._id) }, visibleToClient: true, recordStatus: 'active' }).sort({ sortOrder: 1 }).lean();
     return {
-      organization: { name: org.name },
+      organization: { name: org.name, logo: org.logo || '' },
       client: { companyName: vendor.companyName, contactPerson: vendor.contactPerson, publicCode: conversion.publicCode },
       rollup,
       projects: projects.map((p) => ({ ...p, status: normalizeProjectStatus(p.status), milestones: milestones.filter((m) => String(m.projectId) === String(p._id)) })),
@@ -89,7 +89,7 @@ publicRoutes.get(
     if (!isObjectId(req.params.id)) throw new NotFoundError('Invoice');
     const invoice = await Invoice.findOne({ ...clientInvoiceFilter(organizationId, conversionUuid), _id: req.params.id }).lean();
     if (!invoice) throw new NotFoundError('Invoice');
-    return { organization: { name: org.name }, company: companyProfile(org.name), invoice: withDisplayStatus(invoice), amountInWords: numberToWordsINR(invoice.total) };
+    return { organization: { name: org.name, logo: org.logo || '' }, company: companyProfile(org), invoice: withDisplayStatus(invoice), amountInWords: numberToWordsINR(invoice.total) };
   })
 );
 
@@ -130,7 +130,7 @@ publicRoutes.get(
     const live = projects.filter((p) => ACTIVE_PROJECT_STATUSES.includes(normalizeProjectStatus(p.status)));
     const nextDelivery = live.map((p) => p.expectedDelivery).filter(Boolean).sort((a, b) => +new Date(a!) - +new Date(b!))[0] || null;
     return {
-      organization: { name: org.name },
+      organization: { name: org.name, logo: org.logo || '' },
       publicCode: conversion.publicCode,
       clientName: vendor?.companyName || '',
       projects: projects.map((p) => ({ ...p, status: normalizeProjectStatus(p.status), milestones: milestones.filter((m) => String(m.projectId) === String(p._id)) })),
@@ -146,7 +146,7 @@ publicRoutes.get(
 publicRoutes.get(
   '/careers',
   inOrg(async (_req, organizationId, org) => ({
-    organization: { name: org.name },
+    organization: { name: org.name, logo: org.logo || '' },
     jobs: await Job.find({ organizationId, status: 'published', recordStatus: 'active' }).select('title slug department location employmentType summary publishedAt').sort({ publishedAt: -1 }).lean(),
   }))
 );
@@ -178,7 +178,7 @@ publicRoutes.post(
       organizationId, jobId: job._id, jobTitle: job.title, applicantName: body.applicantName, applicantEmail: body.applicantEmail || '',
       applicantPhone: body.applicantPhone || '', answers, createdBy: 'public',
     });
-    await notifyStaff(organizationId, { type: 'careers', title: `New application: ${job.title}`, body: body.applicantName, href: `/growth/applications?jobId=${job._id}`, recipientRoles: ['admin', 'hr'] });
+    await notifyStaff(organizationId, { type: 'careers', title: `New application: ${job.title}`, body: body.applicantName, href: `/growth/applications?jobId=${job._id}`, recipientRoles: ['admin', 'hr'], emailCategory: 'careers' });
     return { id: String(application._id), message: 'Application received — thank you!' };
   })
 );
@@ -246,7 +246,7 @@ publicRoutes.post(
       ...rest, referredEmail: email, organizationId, referrerId: referrer._id, source: 'manual_submission', flaggedDuplicate: Boolean(dup), createdBy: referrer.email,
     });
     await ReferralActivity.create({ organizationId, referralId: referral._id, eventType: 'created', toStage: 'submitted', createdBy: referrer.email });
-    await notifyStaff(organizationId, { type: 'referral', title: `New referral from ${referrer.fullName}`, body: body.referredName, href: `/growth/referrals`, recipientRoles: ['admin'] });
+    await notifyStaff(organizationId, { type: 'referral', title: `New referral from ${referrer.fullName}`, body: body.referredName, href: `/growth/referrals`, recipientRoles: ['admin'], emailCategory: 'referrals' });
     return { id: String(referral._id), message: 'Referral submitted — we will be in touch.' };
   })
 );
@@ -265,7 +265,7 @@ publicRoutes.post(
     const allowed = Object.keys(EGAApplication.schema.paths).filter((k) => !['_id', 'organizationId', 'status', 'score', 'scoreBreakdown', 'adminNotes', 'recordStatus', 'createdBy', 'updatedBy', 'createdAt', 'updatedAt', '__v'].includes(k));
     const data = Object.fromEntries(allowed.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
     const app = await EGAApplication.create({ ...data, fullName, email, organizationId, score, scoreBreakdown: breakdown, createdBy: 'public' });
-    await notifyStaff(organizationId, { type: 'ega', title: `New EGA application (${score})`, body: fullName, href: '/growth/ega', recipientRoles: ['admin', 'hr'], email: false });
+    await notifyStaff(organizationId, { type: 'ega', title: `New EGA application (${score})`, body: fullName, href: '/growth/ega', recipientRoles: ['admin', 'hr'], email: false, emailCategory: 'ega' });
     return { id: String(app._id), message: 'Application received.' };
   })
 );

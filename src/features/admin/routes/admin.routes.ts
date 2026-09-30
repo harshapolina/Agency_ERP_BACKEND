@@ -5,6 +5,8 @@ import { adminController } from '../controllers/admin.controller.js';
 import { authenticate, authorizeRoles } from '../../../shared/middleware/auth.js';
 import { validateBody } from '../../../shared/middleware/validate.js';
 import { organizationDatabaseRoutes } from './database.routes.js';
+import { organizationSettingsRoutes } from '../../os/routes/settings.routes.js';
+import { logoSchema } from '../../../shared/os/company.js';
 
 const router = Router();
 
@@ -18,6 +20,7 @@ const createOrgSchema = z.object({
   industry: z.string().optional(),
   website: z.string().optional(),
   plan: planEnum.optional(),
+  logo: logoSchema.optional(),
   adminEmail: z.string().email(),
   adminPassword: z.string().min(8),
   adminFirstName: z.string().min(1),
@@ -79,6 +82,7 @@ router.get('/organizations/:id', adminController.getOrganization.bind(adminContr
 router.post('/organizations', validateBody(createOrgSchema), adminController.createOrganization.bind(adminController));
 router.patch('/organizations/:id', validateBody(updateOrgSchema), adminController.updateOrganization.bind(adminController));
 router.use('/organizations/:id/database', organizationDatabaseRoutes);
+router.use('/organizations/:id/settings', organizationSettingsRoutes);
 router.get('/organizations/:id/users', adminController.listOrganizationUsers.bind(adminController));
 router.post('/organizations/:id/users', validateBody(createCompanyUserSchema), adminController.createOrganizationUser.bind(adminController));
 router.patch('/organizations/:id/users/:userId', validateBody(updateCompanyUserSchema), adminController.updateOrganizationUser.bind(adminController));
