@@ -57,6 +57,19 @@ describe('company database (tenancy)', () => {
     expect(r.status).toBe(400);
   });
 
+  it('measures shared-database usage for just this company', async () => {
+    const usage = await superAdmin.ok(superAdmin.get(`/admin/organizations/${orgId}/database/usage`));
+    expect(usage).toMatchObject({ mode: 'shared', dbName: t.dbName, database: null });
+    expect(usage.users).toBeGreaterThanOrEqual(2);
+    expect(usage.collections.find((c: any) => c.name === 'leads').documents).toBeGreaterThan(0);
+    expect(usage.documents).toBe(usage.collections.reduce((s: number, c: any) => s + c.documents, 0));
+    expect(usage.connection).not.toMatch(/:[^*@/]+@/);
+
+    const all = await superAdmin.ok(superAdmin.get('/admin/database-usage'));
+    expect(all.find((u: any) => u.organizationId === orgId)).toMatchObject({ mode: 'shared', documents: usage.documents });
+    expect((await admin.get(`/admin/organizations/${orgId}/database/usage`)).status).toBe(403);
+  });
+
   it('moves business data to the dedicated database and never echoes the URI', async () => {
     const leadsBefore = await admin.ok(admin.get('/leads'));
     expect(leadsBefore.length).toBeGreaterThan(0);
@@ -71,6 +84,10 @@ describe('company database (tenancy)', () => {
     await admin.ok(admin.post('/lead-categories', { name: 'Tenant Cat' }));
     // Logins still resolve from the platform database.
     await t.api.login('admin');
+
+    const usage = await superAdmin.ok(superAdmin.get(`/admin/organizations/${orgId}/database/usage?fresh=1`));
+    expect(usage).toMatchObject({ mode: 'dedicated', dbName: tenantDb, documents: 1 });
+    expect(usage.database.collections).toBeGreaterThanOrEqual(1);
 
     const checked = await superAdmin.ok(superAdmin.post(`/admin/organizations/${orgId}/database/check`));
     expect(checked.status).toBe('connected');

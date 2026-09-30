@@ -7,6 +7,8 @@ import { validateBody } from '../../../shared/middleware/validate.js';
 import { organizationDatabaseRoutes } from './database.routes.js';
 import { organizationSettingsRoutes } from '../../os/routes/settings.routes.js';
 import { logoSchema } from '../../../shared/os/company.js';
+import { allDatabaseUsage } from '../services/usage.service.js';
+import { route } from '../../../shared/utils/crud.js';
 
 const router = Router();
 
@@ -77,6 +79,7 @@ const updateAccessRequestSchema = z.object({
 });
 
 router.get('/stats', adminController.getStats.bind(adminController));
+router.get('/database-usage', route(() => allDatabaseUsage()));
 router.get('/organizations', adminController.listOrganizations.bind(adminController));
 router.get('/organizations/:id', adminController.getOrganization.bind(adminController));
 router.post('/organizations', validateBody(createOrgSchema), adminController.createOrganization.bind(adminController));

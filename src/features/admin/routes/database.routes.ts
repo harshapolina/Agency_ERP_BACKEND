@@ -4,6 +4,7 @@ import { Organization } from '../../../models/Organization.js';
 import { route, parseBody, isObjectId } from '../../../shared/utils/crud.js';
 import { NotFoundError, ValidationError } from '../../../shared/errors/index.js';
 import { encryptData, maskMongoUri } from '../../../shared/utils/crypto.js';
+import { databaseUsage, forgetUsage } from '../services/usage.service.js';
 import { connectionForOrganization, invalidateOrganizationConnection, testMongoConnection, tenantDatabaseStatus } from '../../../config/tenant.js';
 
 /** Mounted under `/admin/organizations/:id/database` (super admin only). The URI is write-only. */
@@ -49,6 +50,18 @@ organizationDatabaseRoutes.get(
   route(async (req) => publicDatabase((await loadOrg(req.params.id as string)).toObject()))
 );
 
+organizationDatabaseRoutes.get(
+  '/usage',
+  route(async (req) => {
+    const org = await loadOrg(req.params.id as string);
+    try {
+      return await databaseUsage(String(org._id), req.query.fresh === '1');
+    } catch {
+      throw new ValidationError('Could not reach this company\'s database to measure usage');
+    }
+  })
+);
+
 organizationDatabaseRoutes.post(
   '/test',
   route(async (req) => {
@@ -78,6 +91,7 @@ organizationDatabaseRoutes.put(
       }
     );
     await invalidateOrganizationConnection(String(org._id));
+    forgetUsage(String(org._id));
     return publicDatabase((await loadOrg(String(org._id))).toObject());
   })
 );
@@ -92,6 +106,7 @@ organizationDatabaseRoutes.post(
     let lastError = '';
     try {
       await invalidateOrganizationConnection(String(org._id));
+    forgetUsage(String(org._id));
       const conn = await connectionForOrganization(String(org._id));
       await conn.db!.admin().ping();
     } catch (error) {
@@ -115,6 +130,7 @@ organizationDatabaseRoutes.delete(
       }
     );
     await invalidateOrganizationConnection(String(org._id));
+    forgetUsage(String(org._id));
     return publicDatabase((await loadOrg(String(org._id))).toObject());
   })
 );

@@ -65,6 +65,12 @@ function modelOn<T>(conn: Connection, name: string): Model<T> {
   return conn.models[name] as Model<T>;
 }
 
+/** Every business model bound to `conn` — the collections that make up a company's data. */
+export function tenantModelsOn(conn: Connection): Model<unknown>[] {
+  ensureRegistered(conn);
+  return [...registry.keys()].map((name) => conn.models[name] as Model<unknown>);
+}
+
 /** Registers a business model whose data lives in the current organization's database. */
 export function tenantModel<T>(name: string, schema: Schema<T>): Model<T> {
   registry.set(name, schema as Schema);
