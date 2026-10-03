@@ -65,12 +65,22 @@ app.get('/', (_req, res) => {
   });
 });
 
-app.get('/api/health', (_req, res) => {
-  res.json({
-    success: true,
-    message: 'Agency ERP API is running',
+app.get('/api/health', async (_req, res) => {
+  let database = getDatabaseStatus();
+  let dbError: string | undefined;
+  try {
+    await connectDatabase();
+    database = getDatabaseStatus();
+  } catch (error) {
+    database = 'disconnected';
+    dbError = (error as Error).message?.slice(0, 200) || 'MongoDB connection failed';
+  }
+  res.status(dbError ? 503 : 200).json({
+    success: !dbError,
+    message: dbError ? 'Agency ERP API is up but database is unreachable' : 'Agency ERP API is running',
     version: '1.0.0',
-    database: getDatabaseStatus(),
+    database,
+    ...(dbError ? { dbError } : {}),
   });
 });
 

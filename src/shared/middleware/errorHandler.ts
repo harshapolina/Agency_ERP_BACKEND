@@ -42,14 +42,19 @@ export function errorHandler(
   const isDbError =
     err.name === 'MongoServerSelectionError' ||
     err.name === 'MongoNetworkError' ||
-    err.message?.includes('MongoDB connection failed');
+    err.name === 'MongooseError' ||
+    err.name === 'MongoParseError' ||
+    err.message?.includes('MongoDB connection failed') ||
+    err.message?.includes('buffering timed out') ||
+    err.message?.includes('bad auth') ||
+    err.message?.includes('Authentication failed');
 
   if (isDbError) {
-    logger.error('Database error', { error: err.message });
+    logger.error('Database error', { error: err.message, name: err.name });
     return res.status(503).json({
       success: false,
       error: {
-        message: 'Database unavailable. Check MONGODB_URI and Atlas network access.',
+        message: 'Database unavailable. Check MONGODB_URI (no quotes), Atlas user password, and Network Access 0.0.0.0/0, then redeploy.',
         code: 'DATABASE_UNAVAILABLE',
       },
     });
