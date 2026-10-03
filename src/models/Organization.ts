@@ -20,6 +20,20 @@ export interface IOrganization extends Document {
   };
   profile?: Partial<Record<CompanyProfileField, string>>;
   notificationEmails?: Partial<Record<NotificationCategory, string[]>>;
+  smtp?: {
+    enabled: boolean;
+    host?: string;
+    port?: number;
+    secure?: boolean;
+    user?: string;
+    fromName?: string;
+    fromEmail?: string;
+    passCipher?: string;
+    passIv?: string;
+    passTag?: string;
+    updatedBy?: string;
+    updatedAt?: Date;
+  };
   database?: {
     enabled: boolean;
     uriCipher?: string;
@@ -56,6 +70,20 @@ const organizationSchema = new Schema<IOrganization>(
     },
     profile: Object.fromEntries(COMPANY_PROFILE_FIELDS.map((f) => [f, { type: String, default: '' }])),
     notificationEmails: Object.fromEntries(NOTIFICATION_CATEGORIES.map((c) => [c, { type: [String], default: [] }])),
+    smtp: {
+      enabled: { type: Boolean, default: false },
+      host: { type: String, default: 'smtp.gmail.com' },
+      port: { type: Number, default: 465 },
+      secure: { type: Boolean, default: true },
+      user: { type: String, default: '' },
+      fromName: { type: String, default: '' },
+      fromEmail: { type: String, default: '' },
+      passCipher: { type: String, select: false },
+      passIv: { type: String, select: false },
+      passTag: { type: String, select: false },
+      updatedBy: { type: String, default: '' },
+      updatedAt: Date,
+    },
     database: {
       enabled: { type: Boolean, default: false },
       uriCipher: { type: String, select: false },

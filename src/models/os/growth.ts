@@ -133,8 +133,33 @@ const egaSchema = osSchema({
   score: { type: Number, default: 0, index: true },
   scoreBreakdown: { type: Object, default: {} },
   adminNotes: str(),
+  answers: { type: Object, default: {} },
 });
 export const EGAApplication = osModel('EGAApplication', egaSchema);
+
+const egaFormFieldSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    type: { type: String, required: true },
+    label: { type: String, required: true, trim: true },
+    section: str({ default: 'Details' }),
+    placeholder: str(),
+    helpText: str(),
+    required: { type: Boolean, default: false },
+    options: { type: [{ value: String, label: String }], default: undefined },
+    scoreMap: { type: Object, default: undefined },
+    maxScore: { type: Number, default: undefined },
+  },
+  { _id: false }
+);
+
+const egaFormSchema = osSchema({
+  title: str({ default: 'Growth Associate programme' }),
+  subtitle: str(),
+  published: { type: Boolean, default: true },
+  fields: { type: [egaFormFieldSchema], default: [] },
+});
+export const EGAFormConfig = osModel('EGAFormConfig', egaFormSchema);
 
 const newsletterSchema = osSchema({
   email: { type: String, required: true, lowercase: true, trim: true },
@@ -143,3 +168,49 @@ const newsletterSchema = osSchema({
 });
 newsletterSchema.index({ organizationId: 1, email: 1 }, { unique: true });
 export const NewsletterSubscriber = osModel('NewsletterSubscriber', newsletterSchema);
+
+const newsletterTemplateSchema = osSchema({
+  name: { type: String, required: true, trim: true },
+  subject: str(),
+  body: str(),
+});
+export const NewsletterTemplate = osModel('NewsletterTemplate', newsletterTemplateSchema);
+
+const newsletterCampaignSchema = osSchema({
+  subject: { type: String, required: true, trim: true },
+  body: { type: String, required: true },
+  status: oneOf(['draft', 'sending', 'sent', 'failed'], 'draft', { index: true }),
+  audience: str({ default: 'subscribed' }),
+  articleId: ref('MagazineArticle'),
+  sentAt: Date,
+  recipientCount: { type: Number, default: 0 },
+  deliveredCount: { type: Number, default: 0 },
+  skippedSmtp: { type: Boolean, default: false },
+  error: str(),
+});
+export const NewsletterCampaign = osModel('NewsletterCampaign', newsletterCampaignSchema);
+
+const magazineIssueSchema = osSchema({
+  title: { type: String, required: true, trim: true },
+  slug: { type: String, required: true, lowercase: true, trim: true },
+  cover: str(),
+  summary: str(),
+  status: oneOf(['draft', 'published'], 'draft', { index: true }),
+  publishedAt: Date,
+});
+magazineIssueSchema.index({ organizationId: 1, slug: 1 }, { unique: true });
+export const MagazineIssue = osModel('MagazineIssue', magazineIssueSchema);
+
+const magazineArticleSchema = osSchema({
+  issueId: ref('MagazineIssue'),
+  title: { type: String, required: true, trim: true },
+  slug: { type: String, required: true, lowercase: true, trim: true },
+  excerpt: str(),
+  body: { type: String, required: true },
+  cover: str(),
+  tags: { type: [String], default: [] },
+  status: oneOf(['draft', 'published'], 'draft', { index: true }),
+  publishedAt: Date,
+});
+magazineArticleSchema.index({ organizationId: 1, slug: 1 }, { unique: true });
+export const MagazineArticle = osModel('MagazineArticle', magazineArticleSchema);

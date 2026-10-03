@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  Referrer, Referral, ReferralActivity, Job, JobApplication, EGAApplication, NewsletterSubscriber,
+  Referrer, Referral, ReferralActivity, Job, JobApplication, EGAApplication, EGAFormConfig,
+  NewsletterSubscriber, NewsletterTemplate, NewsletterCampaign, MagazineIssue, MagazineArticle,
 } from '../../../models/index.js';
 import { authenticate, authorize } from '../../../shared/middleware/auth.js';
-import { crudRouter, route, oid, isObjectId } from '../../../shared/utils/crud.js';
+import { crudRouter, route, oid, isObjectId, parseBody } from '../../../shared/utils/crud.js';
 import { actorFrom, logActivity } from '../../../shared/os/activity.js';
 import { NotFoundError, ValidationError } from '../../../shared/errors/index.js';
 import {
@@ -13,6 +14,10 @@ import {
 import {
   createUniqueReferralCode, updateReferralStage, markRewardPaid, promoteReferralToLead,
 } from '../services/referral.service.js';
+import { DEFAULT_EGA_FORM, scoreEgaAnswers, type EgaFormField } from '../../../shared/constants/ega-form.js';
+import { isMailConfigured, sendMail } from '../../../shared/utils/mailer.js';
+import { env } from '../../../config/env.js';
+import { Organization } from '../../../models/Organization.js';
 
 // ---------------------------------------------------------------- referrers
 export const referrerRoutes = crudRouter({
@@ -216,9 +221,176 @@ export const egaRoutes = crudRouter({
   afterUpdate: async (doc, prev, ctx) => {
     if (doc.status !== prev.status) await logActivity(ctx.actor, { title: `EGA status → ${doc.status}`, detail: doc.fullName, entityType: 'ega_application', entityId: String(doc._id) });
   },
+  extend: (router) => {
+    router.get('/form', authorize('growth:read'), route(async (req) => ensureEgaForm(req.user!.organizationId, req.user!.email)));
+    router.put(
+      '/form',
+      authorize('growth:write'),
+      route(async (req) => {
+        const body = parseBody<{ title?: string; subtitle?: string; published?: boolean; fields?: EgaFormField[] }>(
+          z.object({
+            title: z.string().min(2).optional(),
+            subtitle: z.string().optional(),
+            published: z.boolean().optional(),
+            fields: z.array(z.object({
+              id: z.string().min(1),
+              type: z.enum(['text', 'email', 'select', 'multiselect', 'scale', 'textarea']),
+              label: z.string().min(1),
+              section: z.string().optional(),
+              placeholder: z.string().optional(),
+              helpText: z.string().optional(),
+              required: z.boolean().optional(),
+              options: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
+              scoreMap: z.record(z.number()).optional(),
+              maxScore: z.number().optional(),
+            })).min(1).optional(),
+          }),
+          req.body
+        );
+        const current = await ensureEgaForm(req.user!.organizationId, req.user!.email);
+        Object.assign(current, body, { updatedBy: req.user!.email });
+        await current.save();
+        return current.toObject();
+      })
+    );
+  },
 });
 
-// ---------------------------------------------------------------- newsletter
+export async function ensureEgaForm(organizationId: string, email = 'system') {
+  let doc = await EGAFormConfig.findOne({ organizationId, recordStatus: 'active' });
+  if (!doc) {
+    doc = await EGAFormConfig.create({
+      organizationId, ...DEFAULT_EGA_FORM, createdBy: email, updatedBy: email,
+    });
+  }
+  return doc;
+}
+
+async function uniqueSlug(model: { exists: (q: object) => Promise<unknown> }, organizationId: string, base: string) {
+  const root = base || 'item';
+  let slug = root;
+  for (let i = 2; await model.exists({ organizationId, slug }); i++) slug = `${root}-${i}`;
+  return slug;
+}
+
+export const magazineIssueRoutes = crudRouter({
+  model: MagazineIssue,
+  resource: 'growth',
+  entityType: 'magazine_issue',
+  label: 'Issue',
+  searchFields: ['title', 'summary'],
+  filterFields: ['status'],
+  createSchema: z.object({ title: z.string().min(2), summary: z.string().optional(), cover: z.string().optional(), status: z.enum(['draft', 'published']).optional() }),
+  updateSchema: z.object({ title: z.string().min(2).optional(), summary: z.string().optional(), cover: z.string().optional(), status: z.enum(['draft', 'published']).optional() }),
+  prepare: async (data, ctx, existing) => {
+    if (!existing) data.slug = await uniqueSlug(MagazineIssue, ctx.organizationId, slugify(String(data.title)));
+    if (data.status === 'published' && existing?.status !== 'published') data.publishedAt = new Date();
+    return data;
+  },
+});
+
+export const magazineArticleRoutes = crudRouter({
+  model: MagazineArticle,
+  resource: 'growth',
+  entityType: 'magazine_article',
+  label: 'Article',
+  searchFields: ['title', 'excerpt', 'tags'],
+  filterFields: ['status', 'issueId'],
+  createSchema: z.object({
+    title: z.string().min(2), excerpt: z.string().optional(), body: z.string().min(1, 'Article body is required'),
+    cover: z.string().optional(), tags: z.array(z.string()).optional(), issueId: z.string().optional(),
+    status: z.enum(['draft', 'published']).optional(),
+  }),
+  updateSchema: z.object({
+    title: z.string().min(2).optional(), excerpt: z.string().optional(), body: z.string().optional(),
+    cover: z.string().optional(), tags: z.array(z.string()).optional(), issueId: z.string().optional().nullable(),
+    status: z.enum(['draft', 'published']).optional(),
+  }),
+  prepare: async (data, ctx, existing) => {
+    if (!existing) data.slug = await uniqueSlug(MagazineArticle, ctx.organizationId, slugify(String(data.title)));
+    if (data.status === 'published' && existing?.status !== 'published') data.publishedAt = new Date();
+    return data;
+  },
+});
+
+export const newsletterTemplateRoutes = crudRouter({
+  model: NewsletterTemplate,
+  resource: 'growth',
+  entityType: 'newsletter_template',
+  label: 'Template',
+  searchFields: ['name', 'subject'],
+  createSchema: z.object({ name: z.string().min(2), subject: z.string().optional(), body: z.string().optional() }),
+  updateSchema: z.object({ name: z.string().min(2).optional(), subject: z.string().optional(), body: z.string().optional() }),
+});
+
+export const newsletterCampaignRoutes = Router();
+newsletterCampaignRoutes.use(authenticate);
+
+newsletterCampaignRoutes.get('/', authorize('growth:read'), route(async (req) =>
+  NewsletterCampaign.find({ organizationId: req.user!.organizationId, recordStatus: 'active' }).sort({ createdAt: -1 }).limit(100).lean()
+));
+
+newsletterCampaignRoutes.post('/', authorize('growth:write'), route(async (req, res) => {
+  const b = parseBody<{ subject: string; body: string; articleId?: string }>(
+    z.object({ subject: z.string().min(2), body: z.string().min(1), articleId: z.string().optional() }),
+    req.body
+  );
+  const campaign = await NewsletterCampaign.create({
+    organizationId: req.user!.organizationId, ...b, status: 'draft', createdBy: req.user!.email, updatedBy: req.user!.email,
+  });
+  res.status(201);
+  return campaign;
+}));
+
+newsletterCampaignRoutes.post('/:id/send', authorize('growth:write'), route(async (req) => {
+  const campaign = await NewsletterCampaign.findOne({ _id: req.params.id, organizationId: req.user!.organizationId });
+  if (!campaign) throw new NotFoundError('Campaign');
+  const subscribers = await NewsletterSubscriber.find({ organizationId: req.user!.organizationId, status: 'subscribed', recordStatus: 'active' }).select('email').lean();
+  const emails = subscribers.map((s) => s.email);
+  campaign.recipientCount = emails.length;
+  campaign.status = 'sending';
+  await campaign.save();
+
+  let magUrl = '';
+  if (campaign.articleId) {
+    const article = await MagazineArticle.findById(campaign.articleId).select('slug').lean();
+    const org = await Organization.findById(req.user!.organizationId).select('slug').lean();
+    if (article?.slug && org?.slug) magUrl = `${env.APP_URL.replace(/\/$/, '')}/magazine/${org.slug}/${article.slug}`;
+  }
+  const html = `<!doctype html><html><body style="font-family:Inter,Arial,sans-serif;color:#111;line-height:1.6">
+    <div style="max-width:560px;margin:24px auto">${campaign.body.replace(/\n/g, '<br/>')}
+    ${magUrl ? `<p><a href="${magUrl}">Read in our magazine →</a></p>` : ''}
+    </div></body></html>`;
+
+  if (!emails.length) {
+    campaign.status = 'sent';
+    campaign.sentAt = new Date();
+    campaign.deliveredCount = 0;
+    campaign.skippedSmtp = true;
+    await campaign.save();
+    return campaign;
+  }
+
+  if (!(await isMailConfigured(req.user!.organizationId))) {
+    campaign.status = 'sent';
+    campaign.sentAt = new Date();
+    campaign.deliveredCount = 0;
+    campaign.skippedSmtp = true;
+    campaign.error = 'SMTP is not configured — campaign saved as sent locally so you can still track it.';
+    await campaign.save();
+    return campaign;
+  }
+
+  const ok = await sendMail(emails, campaign.subject, html, { organizationId: req.user!.organizationId });
+  campaign.status = ok ? 'sent' : 'failed';
+  campaign.sentAt = new Date();
+  campaign.deliveredCount = ok ? emails.length : 0;
+  campaign.error = ok ? '' : 'SMTP send failed';
+  await campaign.save();
+  return campaign;
+}));
+
+// ---------------------------------------------------------------- newsletter subscribers
 export const newsletterRoutes = Router();
 newsletterRoutes.use(authenticate);
 

@@ -15,6 +15,7 @@ import {
 } from '../../../shared/constants/os.js';
 import { withDisplayStatus } from '../../../shared/os/money.js';
 import type { OsDoc } from '../../../models/os/base.js';
+import { syncAgencyTaskToSalesPortal } from '../services/sales-task.service.js';
 
 const asOs = (m: unknown) => m as Model<OsDoc>;
 
@@ -383,6 +384,7 @@ async function transitionTask(ctx: CrudContext, task: OsDoc, next: string, overr
   const updated = (await Task.findByIdAndUpdate(task._id, { $set: set }, { new: true }).lean()) as OsDoc;
   await logActivity(ctx.actor, { title: next === 'completed' ? 'Task completed' : 'Task status changed', detail: `${task.title}: ${prev} → ${next}`, entityType: 'task', entityId: String(task._id), projectId: task.projectId ? String(task.projectId) : undefined, actionType: next === 'completed' ? 'TASK_COMPLETED' : 'TASK_STATUS_CHANGED' });
   if (next === 'completed') await notifyUnblocked(ctx.actor, updated);
+  await syncAgencyTaskToSalesPortal({ organizationId: ctx.organizationId, task: updated, actorEmail: ctx.actor.email, notify: false });
   return updated;
 }
 
@@ -458,14 +460,29 @@ export const taskRoutes = crudRouter({
     return data;
   },
   afterCreate: async (doc, ctx) => {
-    if (doc.assignedTo && String(doc.assignedTo) !== ctx.actor.userId) {
-      await notifyStaff(ctx.organizationId, { title: `New task: ${doc.title}`, body: doc.dueDate ? `Due ${new Date(doc.dueDate).toDateString()}` : '', href: `/tasks/${doc._id}`, recipientUserIds: [String(doc.assignedTo)] });
+    const mirrored = await syncAgencyTaskToSalesPortal({
+      organizationId: ctx.organizationId, task: doc, actorEmail: ctx.actor.email, notify: true,
+    });
+    if (!mirrored && doc.assignedTo && String(doc.assignedTo) !== ctx.actor.userId) {
+      await notifyStaff(ctx.organizationId, {
+        title: `New task: ${doc.title}`,
+        body: doc.dueDate ? `Due ${new Date(doc.dueDate).toDateString()}` : '',
+        href: `/tasks/${doc._id}`,
+        recipientUserIds: [String(doc.assignedTo)],
+        emailCategory: 'tasks',
+      });
     }
     await logActivity(ctx.actor, { title: 'Task assigned', detail: doc.title, entityType: 'task', entityId: String(doc._id), projectId: doc.projectId ? String(doc.projectId) : undefined, actionType: 'TASK_ASSIGNED' });
   },
   afterUpdate: async (doc, prev, ctx) => {
-    if (String(doc.assignedTo || '') !== String(prev.assignedTo || '') && doc.assignedTo) {
-      await notifyStaff(ctx.organizationId, { title: `Task reassigned to you: ${doc.title}`, href: `/tasks/${doc._id}`, recipientUserIds: [String(doc.assignedTo)], excludeUserId: ctx.actor.userId });
+    const reassigned = String(doc.assignedTo || '') !== String(prev.assignedTo || '');
+    const mirrored = await syncAgencyTaskToSalesPortal({
+      organizationId: ctx.organizationId, task: doc, actorEmail: ctx.actor.email, notify: reassigned,
+    });
+    if (reassigned && doc.assignedTo) {
+      if (!mirrored) {
+        await notifyStaff(ctx.organizationId, { title: `Task reassigned to you: ${doc.title}`, href: `/tasks/${doc._id}`, recipientUserIds: [String(doc.assignedTo)], excludeUserId: ctx.actor.userId, emailCategory: 'tasks' });
+      }
       await logActivity(ctx.actor, { title: 'Task reassigned', detail: doc.title, entityType: 'task', entityId: String(doc._id), actionType: 'TASK_REASSIGNED' });
     }
     if (String(doc.dueDate || '') !== String(prev.dueDate || '')) {

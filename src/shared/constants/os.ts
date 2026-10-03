@@ -98,7 +98,15 @@ export const SALES_LEAD_TEMPERATURES = ['hot', 'warm', 'cold'] as const;
 export const SALES_LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'converted', 'lost'] as const;
 export const SALES_DEAL_STAGES = ['new', 'contacted', 'qualified', 'meeting', 'proposal', 'negotiation', 'won', 'lost'] as const;
 export const SALES_LOST_REASONS = ['price_objection', 'timing_issue', 'requirement_mismatch', 'chose_competitor', 'no_response', 'other'] as const;
-export const SALES_CALL_OUTCOMES = ['connected', 'no_answer', 'busy', 'interested', 'not_interested', 'callback', 'qualified', 'other'] as const;
+/** Outcomes an employee can pick after a call. Legacy values stay so older logs still validate. */
+export const SALES_CALL_FORM_OUTCOMES = ['interested', 'not_interested', 'follow_up', 'callback', 'no_answer', 'busy', 'wrong_number', 'other'] as const;
+export const SALES_CALL_OUTCOMES = [...SALES_CALL_FORM_OUTCOMES, 'connected', 'qualified'] as const;
+export const SALES_CALL_STATUSES = ['initiated', 'dialing', 'awaiting_outcome', 'completed', 'cancelled'] as const;
+export const SALES_CALL_CHANNELS = ['this_device', 'os_phone_link', 'linked_phone', 'manual'] as const;
+export const SALES_CALL_PROVIDERS = ['device_sim', 'voip'] as const;
+export const SALES_CALL_DURATION_SOURCES = ['unavailable', 'phone_return', 'crm_timer'] as const;
+/** Someone answered. Busy and no-answer are attempts that did not connect. */
+export const SALES_CONNECTED_CALL_OUTCOMES = ['interested', 'not_interested', 'follow_up', 'callback', 'other', 'wrong_number', 'connected', 'qualified'] as const;
 export const SALES_MEETING_TYPES = ['discovery', 'demo', 'proposal', 'negotiation', 'internal', 'other'] as const;
 export const SALES_MEETING_STATUSES = ['scheduled', 'completed', 'cancelled', 'rescheduled', 'no_show'] as const;
 export const SALES_FOLLOWUP_TYPES = ['call', 'email', 'whatsapp', 'meeting', 'other'] as const;
@@ -123,10 +131,18 @@ export const SALES_MODULES = [
   'analytics.lost_deals', 'reports.reports', 'reports.export', 'growth.ega', 'growth.ega_form', 'growth.applications',
   'admin.notifications', 'admin.approvals', 'admin.teams', 'admin.territories', 'admin.audit_logs',
 ] as const;
+/** Full LeadSquared-style BDA defaults. Admin-only keys stay forced off via SALES_ADMIN_ONLY_MODULES. */
 export const DEFAULT_EMPLOYEE_MODULES = [
-  'dashboard.sales', 'leads.management', 'leads.qualification', 'sales.pipeline', 'sales.deals',
-  'customers.management', 'comm.calls', 'comm.meetings', 'comm.followups', 'tasks.management',
-  'tasks.calendar', 'perf.daily_work_status', 'admin.notifications',
+  'dashboard.sales',
+  'leads.management', 'leads.qualification',
+  'sales.pipeline', 'sales.deals', 'sales.negotiation', 'sales.closure', 'sales.forecast',
+  'customers.management', 'customers.documents',
+  'comm.calls', 'comm.meetings', 'comm.followups', 'comm.email_whatsapp',
+  'docs.quotations', 'docs.proposals', 'docs.sales_documents',
+  'perf.targets', 'perf.performance', 'perf.leaderboard', 'perf.daily_report', 'perf.productivity', 'perf.daily_work_status',
+  'workforce.attendance_sync',
+  'tasks.management', 'tasks.calendar',
+  'admin.notifications', 'admin.approvals',
 ];
 export const SALES_ADMIN_ONLY_MODULES = [
   'dashboard.manager', 'leads.assignment', 'workforce.attendance_dashboard', 'workforce.live_status',
@@ -136,7 +152,7 @@ export const SALES_ADMIN_ONLY_MODULES = [
 ];
 
 /** Extra addresses a company can route its notification emails to, on top of the users who already receive them. */
-export const NOTIFICATION_CATEGORIES = ['finance', 'sales', 'careers', 'referrals', 'ega', 'alerts'] as const;
+export const NOTIFICATION_CATEGORIES = ['finance', 'sales', 'tasks', 'careers', 'referrals', 'ega', 'alerts'] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
 export const COMPANY_PROFILE_FIELDS = [

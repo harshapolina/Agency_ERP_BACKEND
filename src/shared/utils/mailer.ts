@@ -1,24 +1,65 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import { env } from '../../config/env.js';
+import { currentOrganizationId } from '../../config/tenant.js';
+import { Organization } from '../../models/Organization.js';
+import { decryptData } from './crypto.js';
 import { logger } from '../logger/index.js';
 
-let transporter: Transporter | null = null;
-
-export function isMailConfigured() {
-  return Boolean(env.SMTP_USER && env.SMTP_PASS);
+export interface SendMailOpts {
+  organizationId?: string;
 }
 
-function getTransporter(): Transporter | null {
-  if (!isMailConfigured()) return null;
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
+interface ResolvedSmtp {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+}
+
+async function resolveSmtp(organizationId?: string): Promise<ResolvedSmtp | null> {
+  const orgId = organizationId || currentOrganizationId();
+  if (orgId) {
+    const org = await Organization.findById(orgId)
+      .select('name smtp.enabled smtp.host smtp.port smtp.secure smtp.user smtp.fromName smtp.fromEmail +smtp.passCipher +smtp.passIv +smtp.passTag')
+      .lean();
+    const smtp = org?.smtp;
+    if (smtp?.enabled && smtp.user) {
+      const pass = decryptData({ cipher: smtp.passCipher, iv: smtp.passIv, tag: smtp.passTag });
+      if (pass) {
+        const host = (smtp.host || 'smtp.gmail.com').trim();
+        const port = Number(smtp.port) || 465;
+        const fromEmail = (smtp.fromEmail || smtp.user).trim();
+        const fromName = (smtp.fromName || org?.name || '').trim().replace(/"/g, '');
+        return {
+          host,
+          port,
+          secure: smtp.secure ?? port === 465,
+          user: smtp.user.trim(),
+          pass,
+          from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
+        };
+      }
+    }
+  }
+
+  if (env.SMTP_USER && env.SMTP_PASS) {
+    return {
       host: env.SMTP_HOST,
       port: env.SMTP_PORT,
       secure: env.SMTP_PORT === 465,
-      auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
-    });
+      user: env.SMTP_USER,
+      pass: env.SMTP_PASS,
+      from: env.EMAIL_FROM || env.SMTP_USER,
+    };
   }
-  return transporter;
+  return null;
+}
+
+/** True when company SMTP (preferred) or server env SMTP is available. */
+export async function isMailConfigured(organizationId?: string) {
+  return Boolean(await resolveSmtp(organizationId));
 }
 
 function escapeHtml(s: string) {
@@ -53,23 +94,41 @@ export function renderNotificationEmail({ title, body, href, eyebrow = 'Editco O
   </div></body></html>`;
 }
 
-export async function sendMail(to: string | string[], subject: string, html: string): Promise<boolean> {
-  const recipients = (Array.isArray(to) ? to : [to]).map((t) => t.trim()).filter(Boolean);
-  if (!recipients.length) return false;
-  const t = getTransporter();
-  if (!t) {
-    logger.debug('Email skipped (SMTP not configured)', { subject, to: recipients });
-    return false;
-  }
+async function sendWithConfig(cfg: ResolvedSmtp, to: string[], subject: string, html: string) {
+  let transporter: Transporter | null = null;
   try {
-    await t.sendMail({ from: env.EMAIL_FROM || env.SMTP_USER, to: recipients.join(','), subject, html });
+    transporter = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: { user: cfg.user, pass: cfg.pass },
+    });
+    await transporter.sendMail({ from: cfg.from, to: to.join(','), subject, html });
     return true;
   } catch (error) {
     logger.error('Email send failed', { subject, error: (error as Error).message });
     return false;
+  } finally {
+    transporter?.close();
   }
 }
 
-export function sendNotificationEmail(to: string | string[], email: NotificationEmail, subject = email.title) {
-  return sendMail(to, subject, renderNotificationEmail(email));
+export async function sendMail(to: string | string[], subject: string, html: string, opts?: SendMailOpts): Promise<boolean> {
+  const recipients = (Array.isArray(to) ? to : [to]).map((t) => t.trim()).filter(Boolean);
+  if (!recipients.length) return false;
+  const cfg = await resolveSmtp(opts?.organizationId);
+  if (!cfg) {
+    logger.debug('Email skipped (SMTP not configured)', { subject, to: recipients });
+    return false;
+  }
+  return sendWithConfig(cfg, recipients, subject, html);
+}
+
+export function sendNotificationEmail(
+  to: string | string[],
+  email: NotificationEmail,
+  subject = email.title,
+  opts?: SendMailOpts
+) {
+  return sendMail(to, subject, renderNotificationEmail(email), opts);
 }

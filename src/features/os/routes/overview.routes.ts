@@ -17,6 +17,7 @@ import { LEAD_STATUSES } from '../../../models/Lead.js';
 import { sendNotificationEmail } from '../../../shared/utils/mailer.js';
 import { notificationRecipients } from '../../../shared/os/company.js';
 import type { OsDoc } from '../../../models/os/base.js';
+import { salesPortalHref } from '../services/sales-portal.service.js';
 
 const DAY = 86_400_000;
 const inr = (n: number) => `₹${Math.round(n || 0).toLocaleString('en-IN')}`;
@@ -155,7 +156,7 @@ overviewRoutes.post(
       ...(recurring.length ? recurring.slice(0, 5).map((r) => `${r.title} (${inr(r.amount)} · ${r.nextDueAt.toISOString().slice(0, 10)})`) : ['No recurring payments due soon.']),
     ];
     const digestTo = [...new Set([...admins.map((a) => a.email.toLowerCase()), ...(await notificationRecipients(orgId, 'alerts'))])];
-    await Promise.all(digestTo.map((to) => sendNotificationEmail(to, { title: `Daily alerts · ${date}`, eyebrow: 'Ops alert', href: '/', ctaLabel: 'Open dashboard →', lines })));
+    await Promise.all(digestTo.map((to) => sendNotificationEmail(to, { title: `Daily alerts · ${date}`, eyebrow: 'Ops alert', href: '/', ctaLabel: 'Open dashboard →', lines }, undefined, { organizationId: orgId })));
 
     if (recurring.length) {
       await notifyStaff(orgId, { type: 'recurring_payment', title: `Recurring payments due (${recurring.length})`, body: recurring.slice(0, 8).map((r) => `${r.title}: ${inr(r.amount)} · ${r.nextDueAt.toISOString().slice(0, 10)}`).join(' · '), href: '/recurring-payments', recipientRoles: ['finance'] });
@@ -191,10 +192,11 @@ overviewRoutes.post(
     const actor = actorFrom(req.user!);
     const { userId, name, active = 0, overdue = 0 } = req.body || {};
     if (!userId) throw new ValidationError('Missing teammate');
+    const href = await salesPortalHref(actor.organizationId, String(userId), '/tasks?view=my');
     await notifyStaff(actor.organizationId, {
       type: 'workload_nudge', title: `Workload check-in from ${actor.name || actor.email}`,
       body: `You currently have ${active} active task(s)${overdue ? ` (${overdue} overdue)` : ''}. Please update statuses or ask for help if blocked.`,
-      href: '/tasks?view=my', recipientUserIds: [String(userId)],
+      href, recipientUserIds: [String(userId)],
     });
     return { message: `Nudge sent to ${name || 'teammate'}.` };
   })

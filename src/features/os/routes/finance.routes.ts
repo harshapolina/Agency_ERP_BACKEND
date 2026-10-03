@@ -31,7 +31,7 @@ async function sendFinanceAlert(input: { title: string; lines: [string, unknown]
   const lines = input.lines.filter(([, v]) => v !== undefined && v !== null && String(v) !== '').map(([k, v]) => `${k}: ${v}`);
   if (input.changes?.length) lines.push(...input.changes.map((c) => `Changed ${c.field}: ${c.from || '—'} → ${c.to || '—'}`));
   lines.push(`By ${input.actor.name || input.actor.email}`);
-  await sendNotificationEmail(to, { title: input.title, eyebrow: input.eyebrow, href: input.href, lines });
+  await sendNotificationEmail(to, { title: input.title, eyebrow: input.eyebrow, href: input.href, lines }, input.title, { organizationId: input.actor.organizationId });
 }
 
 // ---------------------------------------------------------------- invoices
@@ -277,7 +277,7 @@ invoiceRoutes.post(
       href: `${portal.url}/invoices/${invoice._id}`,
       ctaLabel: 'View invoice',
     });
-    const sent = await sendMail(to, `Invoice ${invoice.invoiceNumber} from ${sender}`, html);
+    const sent = await sendMail(to, `Invoice ${invoice.invoiceNumber} from ${sender}`, html, { organizationId: actor.organizationId });
     if (!sent) throw new ValidationError('Failed to send email — check the SMTP settings');
     await logActivity(actor, { title: 'Invoice shared by email', detail: `${invoice.invoiceNumber} → ${to}`, entityType: 'invoice', entityId: String(invoice._id), conversionUuid: invoice.conversionUuid });
     return { message: `Invoice link sent to ${to}` };

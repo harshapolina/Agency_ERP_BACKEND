@@ -4,6 +4,7 @@ import { rateLimit } from 'express-rate-limit';
 import {
   PortalAccess, Conversion, Vendor, Project, ProjectUpdate, Task, Invoice, Payment, OsDocument, Milestone, Meeting,
   Job, JobApplication, Referrer, Referral, ReferralActivity, EGAApplication, NewsletterSubscriber,
+  MagazineIssue, MagazineArticle, PortalComment, PortalApproval, PortalTicket,
 } from '../../../models/index.js';
 import { Organization } from '../../../models/Organization.js';
 import { runWithOrganization } from '../../../config/tenant.js';
@@ -16,6 +17,8 @@ import { companyProfile, type CompanyRecord } from '../../../shared/os/company.j
 import { ACTIVE_PROJECT_STATUSES, normalizeProjectStatus } from '../../../shared/constants/os.js';
 import { conversionRollup } from '../services/conversion.service.js';
 import { createUniqueReferralCode, computeEGAScore } from '../services/referral.service.js';
+import { ensureEgaForm } from './growth.routes.js';
+import { scoreEgaAnswers, type EgaFormField } from '../../../shared/constants/ega-form.js';
 
 export const publicRoutes = Router({ mergeParams: true });
 
@@ -58,7 +61,7 @@ publicRoutes.get(
   '/portal/:token',
   inOrg(async (req, organizationId, org) => {
     const { conversion, vendor, conversionUuid } = await resolvePortal(organizationId, req.params.token as string);
-    const [rollup, projects, updates, actionTasks, invoices, documents, meetings, payments] = await Promise.all([
+    const [rollup, projects, updates, actionTasks, invoices, documents, meetings, payments, comments, approvals, tickets] = await Promise.all([
       conversionRollup(organizationId, conversionUuid),
       Project.find({ organizationId, conversionUuid, recordStatus: { $ne: 'archived' } }).select('name service status progress startDate expectedDelivery').sort({ createdAt: -1 }).lean(),
       ProjectUpdate.find({ organizationId, conversionUuid, visibility: 'client_visible', recordStatus: 'active', publishedAt: { $exists: true } }).sort({ publishedAt: -1 }).limit(20).lean(),
@@ -67,6 +70,9 @@ publicRoutes.get(
       OsDocument.find({ organizationId, conversionUuid, visibleToClient: true, recordStatus: 'active' }).select('title fileName mimeType size createdAt').sort({ createdAt: -1 }).lean(),
       Meeting.find({ organizationId, conversionUuid, visibleToClient: true, recordStatus: 'active' }).select('title startsAt meetingType decisions actionItems').sort({ startsAt: -1 }).limit(10).lean(),
       Payment.find({ organizationId, conversionUuid, recordStatus: 'active' }).select('amount paidAt method').sort({ paidAt: -1 }).lean(),
+      PortalComment.find({ organizationId, conversionUuid }).sort({ createdAt: -1 }).limit(50).lean(),
+      PortalApproval.find({ organizationId, conversionUuid, recordStatus: 'active' }).sort({ createdAt: -1 }).lean(),
+      PortalTicket.find({ organizationId, conversionUuid, recordStatus: 'active' }).sort({ createdAt: -1 }).lean(),
     ]);
     const milestones = await Milestone.find({ organizationId, projectId: { $in: projects.map((p) => p._id) }, visibleToClient: true, recordStatus: 'active' }).sort({ sortOrder: 1 }).lean();
     return {
@@ -77,7 +83,7 @@ publicRoutes.get(
       updates,
       tasks: actionTasks,
       invoices: invoices.map((i) => withDisplayStatus(i)),
-      documents, meetings, payments,
+      documents, meetings, payments, comments, approvals, tickets,
     };
   })
 );
@@ -251,21 +257,47 @@ publicRoutes.post(
   })
 );
 
-// ---------------------------------------------------------------- EGA + newsletter
+// ---------------------------------------------------------------- EGA + newsletter + magazine
+publicRoutes.get(
+  '/ega/form',
+  inOrg(async (_req, organizationId, org) => {
+    const form = await ensureEgaForm(organizationId, 'public');
+    return {
+      organization: { name: org.name, logo: org.logo || '' },
+      title: form.title,
+      subtitle: form.subtitle,
+      published: form.published,
+      fields: form.fields,
+    };
+  })
+);
+
 publicRoutes.post(
   '/ega',
   inOrg(async (req, organizationId) => {
     const body = req.body as Record<string, unknown>;
-    const fullName = String(body.fullName || '').trim();
-    const email = String(body.email || '').trim().toLowerCase();
+    const answers = (body.answers && typeof body.answers === 'object' ? body.answers : body) as Record<string, unknown>;
+    const fullName = String(answers.fullName || body.fullName || '').trim();
+    const email = String(answers.email || body.email || '').trim().toLowerCase();
     if (!fullName) throw new ValidationError('Name is required');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ValidationError('Valid email required');
     if (await EGAApplication.exists({ organizationId, email })) throw new ValidationError('You have already applied with this email');
-    const { score, breakdown } = computeEGAScore(body);
-    const allowed = Object.keys(EGAApplication.schema.paths).filter((k) => !['_id', 'organizationId', 'status', 'score', 'scoreBreakdown', 'adminNotes', 'recordStatus', 'createdBy', 'updatedBy', 'createdAt', 'updatedAt', '__v'].includes(k));
-    const data = Object.fromEntries(allowed.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
-    const app = await EGAApplication.create({ ...data, fullName, email, organizationId, score, scoreBreakdown: breakdown, createdBy: 'public' });
-    await notifyStaff(organizationId, { type: 'ega', title: `New EGA application (${score})`, body: fullName, href: '/growth/ega', recipientRoles: ['admin', 'hr'], email: false, emailCategory: 'ega' });
+    const form = await ensureEgaForm(organizationId, 'public');
+    for (const field of form.fields as EgaFormField[]) {
+      if (!field.required) continue;
+      const v = answers[field.id];
+      if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) {
+        throw new ValidationError(`${field.label} is required`);
+      }
+    }
+    const scored = scoreEgaAnswers(form.fields as EgaFormField[], answers);
+    const fallback = computeEGAScore(answers);
+    const score = scored.score || fallback.score;
+    const scoreBreakdown = Object.keys(scored.breakdown).length ? scored.breakdown : fallback.breakdown;
+    const allowed = Object.keys(EGAApplication.schema.paths).filter((k) => !['_id', 'organizationId', 'status', 'score', 'scoreBreakdown', 'adminNotes', 'answers', 'recordStatus', 'createdBy', 'updatedBy', 'createdAt', 'updatedAt', '__v'].includes(k));
+    const data = Object.fromEntries(allowed.filter((k) => answers[k] !== undefined).map((k) => [k, answers[k]]));
+    const app = await EGAApplication.create({ ...data, fullName, email, answers, organizationId, score, scoreBreakdown, createdBy: 'public' });
+    await notifyStaff(organizationId, { type: 'ega', title: `New EGA application (${score})`, body: fullName, href: '/growth/ega', recipientRoles: ['admin', 'hr'], emailCategory: 'ega' });
     return { id: String(app._id), message: 'Application received.' };
   })
 );
@@ -283,3 +315,70 @@ publicRoutes.post(
     return { message: 'Subscribed.' };
   })
 );
+
+publicRoutes.get(
+  '/magazine',
+  inOrg(async (_req, organizationId, org) => {
+    const [issues, articles] = await Promise.all([
+      MagazineIssue.find({ organizationId, status: 'published', recordStatus: 'active' }).sort({ publishedAt: -1 }).lean(),
+      MagazineArticle.find({ organizationId, status: 'published', recordStatus: 'active' }).sort({ publishedAt: -1 }).limit(40).lean(),
+    ]);
+    return { organization: { name: org.name, logo: org.logo || '', slug: org.slug }, issues, articles };
+  })
+);
+
+publicRoutes.get(
+  '/magazine/:articleSlug',
+  inOrg(async (req, organizationId, org) => {
+    const article = await MagazineArticle.findOne({ organizationId, slug: String(req.params.articleSlug).toLowerCase(), status: 'published', recordStatus: 'active' }).lean();
+    if (!article) throw new NotFoundError('Article');
+    const more = await MagazineArticle.find({ organizationId, status: 'published', recordStatus: 'active', _id: { $ne: article._id } }).sort({ publishedAt: -1 }).limit(4).select('title slug excerpt publishedAt').lean();
+    return { organization: { name: org.name, logo: org.logo || '', slug: org.slug }, article, more };
+  })
+);
+
+publicRoutes.post(
+  '/portal/:token/comments',
+  inOrg(async (req, organizationId) => {
+    const { conversion, vendor, conversionUuid } = await resolvePortal(organizationId, req.params.token as string);
+    const body = String(req.body?.body || '').trim();
+    if (!body) throw new ValidationError('Write a message');
+    const row = await PortalComment.create({
+      organizationId, conversionUuid, authorType: 'client', authorName: vendor.contactPerson || vendor.companyName, body, createdBy: 'client',
+    });
+    await notifyStaff(organizationId, { type: 'portal', title: `Client message from ${vendor.companyName}`, body, href: `/clients/${conversion._id}`, recipientRoles: ['admin', 'project_manager'] });
+    return row;
+  })
+);
+
+publicRoutes.post(
+  '/portal/:token/approvals/:id',
+  inOrg(async (req, organizationId) => {
+    const { conversionUuid } = await resolvePortal(organizationId, req.params.token as string);
+    const status = z.enum(['approved', 'changes_requested']).parse(req.body?.status);
+    const row = await PortalApproval.findOne({ _id: req.params.id, organizationId, conversionUuid });
+    if (!row) throw new NotFoundError('Approval');
+    row.status = status;
+    row.clientComment = String(req.body?.comment || '');
+    row.decidedAt = new Date();
+    await row.save();
+    return row;
+  })
+);
+
+publicRoutes.post(
+  '/portal/:token/tickets',
+  inOrg(async (req, organizationId) => {
+    const { vendor, conversionUuid } = await resolvePortal(organizationId, req.params.token as string);
+    const b = parseBody<{ title: string; body?: string; kind?: string }>(
+      z.object({ title: z.string().min(2), body: z.string().optional(), kind: z.enum(['change_request', 'brief', 'issue', 'question']).optional() }),
+      req.body
+    );
+    const row = await PortalTicket.create({
+      organizationId, conversionUuid, title: b.title, body: b.body || '', kind: b.kind || 'question', createdBy: vendor.companyName,
+    });
+    await notifyStaff(organizationId, { type: 'portal', title: `Client request: ${b.title}`, body: b.body, href: '/clients', recipientRoles: ['admin', 'project_manager'] });
+    return { id: String(row._id), message: 'Request received. Your team will follow up.' };
+  })
+);
+

@@ -30,3 +30,4 @@ export * from './os/delivery.js';
 export * from './os/finance.js';
 export * from './os/growth.js';
 export * from './os/salescrm.js';
+export * from './os/agency.js';

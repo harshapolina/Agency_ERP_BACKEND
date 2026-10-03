@@ -35,7 +35,12 @@ import trackerRoutes from './features/os/routes/tracker.routes.js';
 import { overviewRoutes, serviceCatalogRoutes, industryCatalogRoutes } from './features/os/routes/overview.routes.js';
 import {
   referrerRoutes, referralRoutes, jobRoutes, jobApplicationRoutes, egaRoutes, newsletterRoutes,
+  magazineIssueRoutes, magazineArticleRoutes, newsletterTemplateRoutes, newsletterCampaignRoutes,
 } from './features/os/routes/growth.routes.js';
+import {
+  assetRoutes, knowledgeCategoryRoutes, knowledgeArticleRoutes, contentCalendarRoutes, leaveRoutes,
+  sowTemplateRoutes, sowDocumentRoutes, portalOpsRoutes,
+} from './features/os/routes/agency.routes.js';
 import { salesCrmRoutes } from './features/os/routes/salescrm.routes.js';
 import { publicRoutes } from './features/os/routes/public.routes.js';
 import { cronRoutes } from './features/os/routes/cron.routes.js';
@@ -118,8 +123,20 @@ v1.use('/growth/referrals', referralRoutes);
 v1.use('/growth/jobs', jobRoutes);
 v1.use('/growth/applications', jobApplicationRoutes);
 v1.use('/growth/ega', egaRoutes);
+v1.use('/growth/newsletter/templates', newsletterTemplateRoutes);
+v1.use('/growth/newsletter/campaigns', newsletterCampaignRoutes);
 v1.use('/growth/newsletter', newsletterRoutes);
+v1.use('/growth/magazine/issues', magazineIssueRoutes);
+v1.use('/growth/magazine/articles', magazineArticleRoutes);
 v1.use('/sales-crm', salesCrmRoutes);
+v1.use('/assets', assetRoutes);
+v1.use('/knowledge/categories', knowledgeCategoryRoutes);
+v1.use('/knowledge/articles', knowledgeArticleRoutes);
+v1.use('/content-calendar', contentCalendarRoutes);
+v1.use('/leave', leaveRoutes);
+v1.use('/sow-templates', sowTemplateRoutes);
+v1.use('/sows', sowDocumentRoutes);
+v1.use('/portal-ops', portalOpsRoutes);
 v1.use('/public/:orgSlug', publicRoutes);
 v1.use('/cron', cronRoutes);
 v1.use('/settings', settingsRoutes);

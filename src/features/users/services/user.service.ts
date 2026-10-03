@@ -6,6 +6,7 @@ import { ROLE_PERMISSIONS } from '../../../shared/types/index.js';
 import type { UserRole } from '../../../shared/types/index.js';
 import { paginate, buildSearchFilter } from '../../../shared/utils/pagination.js';
 import type { PaginationQuery } from '../../../shared/types/index.js';
+import { ensureSalesEmployeeForUser } from '../../os/services/sales-employee.service.js';
 
 export class UserService {
   async create(organizationId: string, data: Record<string, unknown>) {
@@ -22,7 +23,7 @@ export class UserService {
     if (existing) throw new ConflictError('Email already registered');
 
     const role = (data.role as UserRole) || 'sales';
-    return User.create({
+    const user = await User.create({
       organizationId,
       email,
       password: await hashPassword(data.password as string),
@@ -33,6 +34,20 @@ export class UserService {
       department: data.department,
       permissions: ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS.sales,
     });
+
+    // Sales / BDA users get a Sales CRM identity so they can open the BDA portal immediately.
+    if (role === 'sales' || role === 'admin') {
+      await ensureSalesEmployeeForUser({
+        organizationId,
+        userId: String(user._id),
+        email,
+        isSalesAdmin: role === 'admin',
+        phone: typeof data.phone === 'string' ? data.phone : undefined,
+        department: typeof data.department === 'string' ? data.department : undefined,
+      });
+    }
+
+    return user;
   }
 
   async findAll(organizationId: string, query: PaginationQuery & { role?: string }) {
@@ -56,6 +71,18 @@ export class UserService {
 
     const user = await User.findOneAndUpdate({ _id: id, organizationId }, updates, { new: true });
     if (!user) throw new NotFoundError('User');
+
+    if (user.role === 'sales' || user.role === 'admin') {
+      await ensureSalesEmployeeForUser({
+        organizationId,
+        userId: String(user._id),
+        email: user.email,
+        isSalesAdmin: user.role === 'admin',
+        phone: user.phone,
+        department: user.department,
+      });
+    }
+
     return {
       _id: user._id,
       email: user.email,

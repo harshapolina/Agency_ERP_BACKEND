@@ -84,7 +84,7 @@ export async function notifyStaff(organizationId: string, input: NotifyInput) {
     if (input.emailCategory) {
       const emailed = new Set(input.email === false ? [] : recipients.map((r) => r.email.toLowerCase()));
       const extra = (await notificationRecipients(organizationId, input.emailCategory)).filter((e) => !emailed.has(e));
-      await Promise.all(extra.map((e) => sendNotificationEmail(e, { title: input.title, body: input.body, href: input.href })));
+      await Promise.all(extra.map((e) => sendNotificationEmail(e, { title: input.title, body: input.body, href: input.href }, input.title, { organizationId })));
     }
     if (!recipients.length) return 0;
 
@@ -103,7 +103,7 @@ export async function notifyStaff(organizationId: string, input: NotifyInput) {
 
     if (input.email !== false) {
       await Promise.all(
-        recipients.map((r) => sendNotificationEmail(r.email, { title: input.title, body: input.body, href: input.href }))
+        recipients.map((r) => sendNotificationEmail(r.email, { title: input.title, body: input.body, href: input.href }, input.title, { organizationId }))
       );
     }
     return recipients.length;

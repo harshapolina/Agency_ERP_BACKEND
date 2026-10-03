@@ -4,7 +4,7 @@ import type { Model } from 'mongoose';
 import {
   SalesEmployee, SalesLead, SalesDeal, SalesCustomer, SalesCall, SalesMeeting, SalesFollowUp, SalesQuotation,
   SalesProposal, SalesTask, SalesTarget, SalesTerritory, SalesApproval, SalesAttendance, SalesWorkStatus,
-  SalesActivityEvent, User, EGAApplication, nextSequence,
+  SalesActivityEvent, SalesMessage, User, EGAApplication, nextSequence,
 } from '../../../models/index.js';
 import { authenticate } from '../../../shared/middleware/auth.js';
 import { route, parseBody, oid, isObjectId, escapeRegex } from '../../../shared/utils/crud.js';
@@ -20,6 +20,10 @@ import {
   LEAD_PRIORITIES,
 } from '../../../shared/constants/os.js';
 import type { OsDoc } from '../../../models/os/base.js';
+import { salesPortalHref } from '../services/sales-portal.service.js';
+import { callingRoutes } from '../calling/routes.js';
+import { buildCallAnalytics, loggedCallMatch, withCallerNames } from '../calling/analytics.js';
+import { toDialablePhone } from '../calling/phone.js';
 
 type ModuleKey = (typeof SALES_MODULES)[number];
 
@@ -49,15 +53,16 @@ async function nextEmployeeCode(organizationId: string, isSalesAdmin: boolean) {
   return `${isSalesAdmin ? 'SA' : 'SE'}-${String(seq).padStart(4, '0')}`;
 }
 
-/** Loads the caller's Sales CRM identity; company admins are provisioned as sales admins on first use. */
+/** Loads the caller's Sales CRM identity; company admins and sales users are provisioned on first use. */
 async function salesContext(req: SalesRequest, _res: Response, next: NextFunction) {
   try {
     const user = req.user!;
     const companyAdmin = permissionsAllow(user.permissions, 'sales_crm:write');
+    const isSalesRole = user.role === 'sales';
     let employee = await SalesEmployee.findOne({ organizationId: user.organizationId, userId: user.id }).lean();
-    if (!employee && companyAdmin) {
+    if (!employee && (companyAdmin || isSalesRole)) {
       employee = (await SalesEmployee.create({
-        organizationId: user.organizationId, userId: user.id, isSalesAdmin: true, employeeCode: await nextEmployeeCode(user.organizationId, true),
+        organizationId: user.organizationId, userId: user.id, isSalesAdmin: companyAdmin, employeeCode: await nextEmployeeCode(user.organizationId, companyAdmin),
         createdBy: user.email, updatedBy: user.email,
       })).toObject();
     }
@@ -116,11 +121,62 @@ async function employeeNames(organizationId: string, employees: OsDoc[]) {
 
 export const salesCrmRoutes = Router();
 salesCrmRoutes.use(authenticate, salesContext as never);
+salesCrmRoutes.use('/calling', needModule('comm.calls') as never, callingRoutes);
 
 // ---------------------------------------------------------------- me + dashboards
 salesCrmRoutes.get('/me', route(async (req) => {
   const s = ctx(req);
   return { employee: s.employee, isSalesAdmin: s.isSalesAdmin, modules: s.modules, name: s.name };
+}));
+
+/** BDA Home / My Day — overdue work, today's agenda, hot leads, quick stats. */
+salesCrmRoutes.get('/my-day', route(async (req) => {
+  const s = ctx(req);
+  const org = oid(orgOf(req));
+  const me = oid(s.employeeId);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayEnd = new Date(+todayStart + DAY);
+  const leadScope = s.isSalesAdmin ? {} : { assignedEmployeeId: me };
+  const ownerScope = s.isSalesAdmin ? {} : { ownerEmployeeId: me };
+  const callScope = s.isSalesAdmin ? {} : { employeeId: me };
+
+  const [overdueFollowUps, todayFollowUps, todayMeetings, todayTasks, overdueTasks, openTasks, hotLeads, todayCalls, openLeads, pendingApprovals] = await Promise.all([
+    SalesFollowUp.find({ organizationId: org, recordStatus: 'active', status: 'pending', dueAt: { $lt: todayStart }, ...ownerScope }).sort({ dueAt: 1 }).limit(20).lean(),
+    SalesFollowUp.find({ organizationId: org, recordStatus: 'active', status: 'pending', dueAt: { $gte: todayStart, $lt: todayEnd }, ...ownerScope }).sort({ dueAt: 1 }).limit(20).lean(),
+    SalesMeeting.find({ organizationId: org, recordStatus: 'active', status: 'scheduled', startsAt: { $gte: todayStart, $lt: todayEnd }, ...ownerScope }).sort({ startsAt: 1 }).limit(20).lean(),
+    SalesTask.find({ organizationId: org, recordStatus: 'active', status: { $ne: 'completed' }, dueDate: { $gte: todayStart, $lt: todayEnd }, ...ownerScope }).sort({ dueDate: 1 }).limit(20).lean(),
+    SalesTask.find({ organizationId: org, recordStatus: 'active', status: { $ne: 'completed' }, dueDate: { $lt: todayStart }, ...ownerScope }).sort({ dueDate: 1 }).limit(20).lean(),
+    SalesTask.find({ organizationId: org, recordStatus: 'active', status: { $ne: 'completed' }, ...ownerScope }).sort({ dueDate: 1, createdAt: -1 }).limit(30).lean(),
+    SalesLead.find({ organizationId: org, recordStatus: 'active', status: { $nin: ['converted', 'lost'] }, temperature: { $in: ['hot', 'warm'] }, ...leadScope }).sort({ updatedAt: -1 }).limit(12).lean(),
+    SalesCall.find({ organizationId: org, calledAt: { $gte: todayStart, $lt: todayEnd }, ...callScope }).sort({ calledAt: -1 }).limit(20).lean(),
+    SalesLead.countDocuments({ organizationId: org, recordStatus: 'active', status: { $nin: ['converted', 'lost'] }, ...leadScope }),
+    s.isSalesAdmin
+      ? SalesApproval.countDocuments({ organizationId: org, status: 'pending' })
+      : SalesApproval.countDocuments({ organizationId: org, status: 'pending', requesterEmployeeId: me }),
+  ]);
+
+  return {
+    date: todayStart.toISOString().slice(0, 10),
+    stats: {
+      openLeads,
+      overdueFollowUps: overdueFollowUps.length,
+      overdueTasks: overdueTasks.length,
+      openTasks: openTasks.length,
+      todayMeetings: todayMeetings.length,
+      todayCalls: todayCalls.length,
+      pendingApprovals,
+    },
+    overdueFollowUps,
+    todayFollowUps,
+    todayMeetings,
+    todayTasks,
+    overdueTasks,
+    openTasks,
+    hotLeads,
+    todayCalls,
+    callAnalytics: await buildCallAnalytics(orgOf(req), s.isSalesAdmin ? undefined : s.employeeId),
+  };
 }));
 
 salesCrmRoutes.get('/dashboard', route(async (req) => {
@@ -148,6 +204,7 @@ salesCrmRoutes.get('/dashboard', route(async (req) => {
       leadStatus: Object.fromEntries(SALES_LEAD_STATUSES.map((st) => [st, leads.filter((l) => l.status === st).length])),
       conversionRate: leads.length ? Math.round((converted / leads.length) * 100) : 0,
       workload: loads.map((l) => ({ ...l, pct: l.openLeads === 0 ? 0 : Math.max(20, Math.round((l.openLeads / maxLoad) * 100)) })),
+      callAnalytics: await buildCallAnalytics(orgOf(req)),
     };
   }
   const me = oid(s.employeeId);
@@ -171,6 +228,7 @@ salesCrmRoutes.get('/dashboard', route(async (req) => {
       revenue: won.reduce((t, d) => t + revenueOf(d), 0), followUpsDue: followUps.length,
     },
     recentLeads: leads.slice(0, 6), followUps, meetings, tasks,
+    callAnalytics: await buildCallAnalytics(orgOf(req), s.employeeId),
   };
 }));
 
@@ -343,14 +401,16 @@ salesCrmRoutes.post('/leads', needModule('leads.management') as never, route(asy
 salesCrmRoutes.get('/leads/:id', needModule('leads.management') as never, route(async (req) => {
   const lead = await findOwned(SalesLead, req, req.params.id as string, 'assignedEmployeeId');
   const org = orgOf(req);
-  const [calls, meetings, followUps, deals, activity] = await Promise.all([
-    SalesCall.find({ organizationId: org, leadId: lead._id }).sort({ calledAt: -1 }).lean(),
+  const [callRows, meetings, followUps, deals, activity, messages] = await Promise.all([
+    SalesCall.find({ organizationId: org, leadId: lead._id, recordStatus: 'active', ...loggedCallMatch() }).sort({ calledAt: -1 }).lean(),
     SalesMeeting.find({ organizationId: org, leadId: lead._id, recordStatus: 'active' }).sort({ startsAt: -1 }).lean(),
     SalesFollowUp.find({ organizationId: org, leadId: lead._id, recordStatus: 'active' }).sort({ dueAt: -1 }).lean(),
     SalesDeal.find({ organizationId: org, leadId: lead._id, recordStatus: 'active' }).sort({ createdAt: -1 }).lean(),
     SalesActivityEvent.find({ organizationId: org, leadId: lead._id }).sort({ createdAt: -1 }).limit(40).lean(),
+    SalesMessage.find({ organizationId: org, leadId: lead._id, recordStatus: 'active' }).sort({ sentAt: -1 }).limit(40).lean(),
   ]);
-  return { lead, calls, meetings, followUps, deals, activity };
+  const calls = await withCallerNames(org, callRows);
+  return { lead, calls, meetings, followUps, deals, activity, messages };
 }));
 
 salesCrmRoutes.patch('/leads/:id', needModule('leads.management') as never, route(async (req) => {
@@ -401,7 +461,13 @@ salesCrmRoutes.post('/leads/:id/assign', needAdmin as never, route(async (req) =
   await lead.save();
   await logSales(req, 'lead_assigned', 'Lead assigned', { leadId: lead._id, metadata: { assignedToEmployeeId: employeeId } });
   await writeAudit(actorFrom(req.user!), { entityType: 'SalesLead', entityId: String(lead._id), field: 'assignedEmployeeId', oldValue: prev, newValue: employeeId });
-  await notifyStaff(org, { type: 'sales_lead_assigned', title: `New lead assigned: ${lead.contactPerson}`, body: lead.company || '', href: `/sales-crm/leads/${lead._id}`, recipientUserIds: [String(employee.userId)] });
+  await notifyStaff(org, {
+    type: 'sales_lead_assigned',
+    title: `New lead assigned: ${lead.contactPerson}`,
+    body: lead.company || '',
+    href: await salesPortalHref(org, String(employee.userId), `/sales-crm/leads/${lead._id}`),
+    recipientUserIds: [String(employee.userId)],
+  });
   return lead;
 }));
 
@@ -540,9 +606,11 @@ salesCrmRoutes.get('/customers', needModule('customers.management') as never, ro
 ));
 
 // ---------------------------------------------------------------- calls, meetings, follow-ups
-salesCrmRoutes.get('/calls', needModule('comm.calls') as never, route(async (req) =>
-  SalesCall.find({ organizationId: orgOf(req), recordStatus: 'active', ...ownScope(req, 'employeeId') }).populate('leadId', 'contactPerson company').sort({ calledAt: -1 }).limit(300).lean()
-));
+salesCrmRoutes.get('/calls', needModule('comm.calls') as never, route(async (req) => {
+  const rows = await SalesCall.find({ organizationId: orgOf(req), recordStatus: 'active', ...ownScope(req, 'employeeId'), ...loggedCallMatch() })
+    .populate('leadId', 'contactPerson company').sort({ calledAt: -1 }).limit(300).lean();
+  return withCallerNames(orgOf(req), rows);
+}));
 
 salesCrmRoutes.post('/calls', needModule('comm.calls') as never, route(async (req, res) => {
   const b = parseBody<{ leadId?: string; durationMinutes?: number; outcome?: string; notes?: string; nextAction?: string; nextFollowUpAt?: string }>(
@@ -550,7 +618,19 @@ salesCrmRoutes.post('/calls', needModule('comm.calls') as never, route(async (re
     req.body
   );
   const s = ctx(req);
-  const call = await SalesCall.create({ ...b, leadId: b.leadId || undefined, nextFollowUpAt: b.nextFollowUpAt || undefined, employeeId: s.employeeId, outcome: b.outcome || 'connected', organizationId: orgOf(req), createdBy: req.user!.email });
+  let phone = '';
+  if (b.leadId) {
+    const lead = await SalesLead.findOne({ _id: b.leadId, organizationId: orgOf(req) }).select('phone').lean();
+    phone = toDialablePhone(lead?.phone)?.e164 || '';
+  }
+  const minutes = b.durationMinutes || 0;
+  const call = await SalesCall.create({
+    ...b, leadId: b.leadId || undefined, nextFollowUpAt: b.nextFollowUpAt || undefined, employeeId: s.employeeId,
+    outcome: b.outcome || 'connected', organizationId: orgOf(req), createdBy: req.user!.email,
+    phone, status: 'completed', channel: 'manual', provider: 'device_sim',
+    durationMinutes: minutes, durationSeconds: minutes ? Math.round(minutes * 60) : null,
+    durationSource: minutes ? 'crm_timer' : 'unavailable',
+  });
   if (b.leadId) await SalesLead.updateOne({ _id: b.leadId, organizationId: orgOf(req) }, { $set: { lastContactedAt: new Date() } });
   if (b.nextFollowUpAt) {
     await SalesFollowUp.create({ organizationId: orgOf(req), leadId: b.leadId || undefined, ownerEmployeeId: s.employeeId, type: 'call', dueAt: new Date(b.nextFollowUpAt), notes: b.nextAction || 'Follow-up from call', createdBy: req.user!.email });
@@ -616,6 +696,79 @@ salesCrmRoutes.post('/follow-ups/:id/status', needModule('comm.followups') as ne
   await followUp.save();
   await logSales(req, 'followup_completed', `Follow-up ${status}`, { leadId: followUp.leadId });
   return followUp;
+}));
+
+// ---------------------------------------------------------------- email / whatsapp (log + deep-link compose)
+salesCrmRoutes.get('/messages', needModule('comm.email_whatsapp') as never, route(async (req) => {
+  const q = req.query as Record<string, string>;
+  const filter: Record<string, unknown> = { organizationId: orgOf(req), recordStatus: 'active', ...ownScope(req, 'employeeId') };
+  if (q.channel && ['email', 'whatsapp'].includes(q.channel)) filter.channel = q.channel;
+  if (q.leadId && isObjectId(q.leadId)) filter.leadId = oid(q.leadId);
+  return SalesMessage.find(filter).populate('leadId', 'contactPerson company email phone').sort({ sentAt: -1 }).limit(300).lean();
+}));
+
+salesCrmRoutes.post('/messages', needModule('comm.email_whatsapp') as never, route(async (req, res) => {
+  const b = parseBody<{
+    channel: 'email' | 'whatsapp';
+    body: string;
+    toAddress?: string;
+    subject?: string;
+    leadId?: string;
+    dealId?: string;
+    direction?: 'outbound' | 'inbound';
+  }>(
+    z.object({
+      channel: z.enum(['email', 'whatsapp']),
+      body: z.string().min(1, 'Message body is required'),
+      toAddress: z.string().optional(),
+      subject: z.string().optional(),
+      leadId: z.string().optional(),
+      dealId: z.string().optional(),
+      direction: z.enum(['outbound', 'inbound']).optional(),
+    }),
+    req.body
+  );
+  if (b.leadId && !isObjectId(b.leadId)) throw new ValidationError('Invalid lead');
+  if (b.dealId && !isObjectId(b.dealId)) throw new ValidationError('Invalid deal');
+
+  let toAddress = (b.toAddress || '').trim();
+  let lead: OsDoc | null = null;
+  if (b.leadId) {
+    lead = await findOwned(SalesLead, req, b.leadId, 'assignedEmployeeId');
+    if (!toAddress) toAddress = b.channel === 'email' ? (lead.email || '') : (lead.phone || '');
+  }
+
+  const message = await SalesMessage.create({
+    organizationId: orgOf(req),
+    channel: b.channel,
+    direction: b.direction || 'outbound',
+    leadId: b.leadId || undefined,
+    dealId: b.dealId || undefined,
+    employeeId: ctx(req).employeeId,
+    toAddress,
+    subject: b.subject || '',
+    body: b.body.trim(),
+    status: 'logged',
+    sentAt: new Date(),
+    createdBy: req.user!.email,
+    updatedBy: req.user!.email,
+  });
+
+  const title = b.channel === 'email' ? `Email logged${b.subject ? `: ${b.subject}` : ''}` : 'WhatsApp message logged';
+  await logSales(req, b.channel === 'email' ? 'email_logged' : 'whatsapp_logged', title, {
+    leadId: message.leadId,
+    dealId: message.dealId,
+    detail: b.body.slice(0, 280),
+    metadata: { messageId: String(message._id), toAddress, channel: b.channel },
+  });
+
+  const deepLink =
+    b.channel === 'email'
+      ? `mailto:${encodeURIComponent(toAddress)}?subject=${encodeURIComponent(b.subject || '')}&body=${encodeURIComponent(b.body)}`
+      : `https://wa.me/${toAddress.replace(/\D/g, '')}?text=${encodeURIComponent(b.body)}`;
+
+  res.status(201);
+  return { ...message.toObject(), deepLink };
 }));
 
 // ---------------------------------------------------------------- quotations + proposals
@@ -719,7 +872,15 @@ salesCrmRoutes.post('/proposals/:id/status', needModule('docs.proposals') as nev
 salesCrmRoutes.get('/tasks', needModule('tasks.management') as never, route(async (req) => {
   const tasks = await SalesTask.find({ organizationId: orgOf(req), recordStatus: 'active', ...ownScope(req) }).sort({ status: 1, dueDate: 1 }).limit(500).lean();
   const now = Date.now();
-  return tasks.map((t) => ({ ...t, status: t.status !== 'completed' && t.dueDate && +new Date(t.dueDate) < now ? 'overdue' : t.status }));
+  const names = await employeeNames(
+    orgOf(req),
+    await SalesEmployee.find({ organizationId: orgOf(req), _id: { $in: tasks.map((t) => t.ownerEmployeeId).filter(Boolean) } }).lean()
+  );
+  return tasks.map((t) => ({
+    ...t,
+    assignedName: names.get(String(t.ownerEmployeeId))?.name || '—',
+    status: t.status !== 'completed' && t.dueDate && +new Date(t.dueDate) < now ? 'overdue' : t.status,
+  }));
 }));
 
 salesCrmRoutes.post('/tasks', needModule('tasks.management') as never, route(async (req, res) => {
@@ -738,7 +899,13 @@ salesCrmRoutes.post('/tasks', needModule('tasks.management') as never, route(asy
   }
   const task = await SalesTask.create({ title: b.title, description: b.description || '', priority: b.priority || 'medium', dueDate: b.dueDate || undefined, ownerEmployeeId: owner, status: 'todo', organizationId: orgOf(req), createdBy: req.user!.email });
   if (assignee) {
-    await notifyStaff(orgOf(req), { type: 'task_assigned', title: 'New task assigned', body: b.title, href: '/sales-crm/tasks', recipientUserIds: [String(assignee.userId)] });
+    await notifyStaff(orgOf(req), {
+      type: 'task_assigned',
+      title: 'New task assigned',
+      body: b.title,
+      href: await salesPortalHref(orgOf(req), String(assignee.userId), '/sales-crm/tasks'),
+      recipientUserIds: [String(assignee.userId)],
+    });
   }
   await logSales(req, 'task_created', assignee ? `Task "${b.title}" assigned` : `Task created: ${b.title}`);
   res.status(201);
@@ -806,8 +973,43 @@ salesCrmRoutes.post('/approvals/:id/decide', needAdmin as never, route(async (re
   }
   await writeAudit(actorFrom(req.user!), { entityType: 'SalesApproval', entityId: String(approval._id), field: 'approval_decided', oldValue: 'pending', newValue: b.decision, reason: b.reviewerComment });
   const requester = await SalesEmployee.findById(approval.requesterEmployeeId).select('userId').lean();
-  if (requester) await notifyStaff(orgOf(req), { type: 'sales_approval', title: `Your ${approval.type} request was ${b.decision}`, body: b.reviewerComment || '', href: '/sales-crm/approvals', recipientUserIds: [String(requester.userId)] });
+  if (requester) {
+    await notifyStaff(orgOf(req), {
+      type: 'sales_approval',
+      title: `Your ${approval.type} request was ${b.decision}`,
+      body: b.reviewerComment || '',
+      href: await salesPortalHref(orgOf(req), String(requester.userId), '/sales-crm/approvals'),
+      recipientUserIds: [String(requester.userId)],
+    });
+  }
   return approval;
+}));
+
+/** Sales person escalates a blocked issue to company / sales admins. */
+salesCrmRoutes.post('/escalate', route(async (req) => {
+  const s = ctx(req);
+  const b = parseBody<{ subject: string; detail?: string }>(
+    z.object({ subject: z.string().min(3, 'Subject is required'), detail: z.string().optional() }),
+    req.body
+  );
+  const [salesAdmins, companyAdmins] = await Promise.all([
+    SalesEmployee.find({ organizationId: orgOf(req), isSalesAdmin: true, status: 'active', recordStatus: 'active' }).select('userId').lean(),
+    User.find({ organizationId: orgOf(req), role: 'admin', isActive: true }).select('_id').lean(),
+  ]);
+  const recipientUserIds = [...new Set([
+    ...salesAdmins.map((a) => String(a.userId)),
+    ...companyAdmins.map((a) => String(a._id)),
+  ])].filter((id) => id !== req.user!.id);
+  if (!recipientUserIds.length) throw new ValidationError('No admin is available to escalate to');
+  await notifyStaff(orgOf(req), {
+    type: 'sales_escalate',
+    title: `Escalation from ${s.name}: ${b.subject}`,
+    body: b.detail || 'A sales teammate needs help.',
+    href: '/sales-crm/team',
+    recipientUserIds,
+  });
+  await logSales(req, 'escalation', b.subject, { metadata: { detail: b.detail || '' } });
+  return { message: 'Sent to your managers. They will follow up in Sales CRM.' };
 }));
 
 // ---------------------------------------------------------------- attendance + work status

@@ -112,7 +112,7 @@ export async function runDailyReminders(organizationId: string, slot: 'morning' 
     const subject = slot === 'morning'
       ? `Good morning ${user.firstName} — your plan for ${formatIst(now).split(',')[0]}`
       : `6 PM check-in ${user.firstName} — finish these before you log off`;
-    await sendNotificationEmail(user.email, { title: subject, lines, href: '/tracker', ctaLabel: 'Open Master Tracker →' }, subject);
+    await sendNotificationEmail(user.email, { title: subject, lines, href: '/tracker', ctaLabel: 'Open Master Tracker →' }, subject, { organizationId });
     sent++;
   }
   return sent;
@@ -146,7 +146,7 @@ export async function runDeadlineReminders(organizationId: string, force = false
       title: subject,
       lines: [`Task: ${label}`, `Priority: ${priority}`, `Deadline: ${formatIst(deadline)} IST`, `Time remaining: ${overdue ? `overdue by ${text}` : text}`],
       href,
-    }, subject);
+    }, subject, { organizationId });
     sent++;
   };
 
@@ -175,9 +175,9 @@ export async function sendTrackerRowReminder(organizationId: string, rowId: stri
       title: overdue ? `Overdue: ${label}` : `Reminder: ${label} — ${text} left`,
       lines: [`Priority: ${row.priority}`, `Deadline: ${formatIst(row.deadline)} IST`],
       href: '/tracker',
-    });
+    }, undefined, { organizationId });
   } else {
-    await sendNotificationEmail(poc.email, { title: `Reminder: ${label}`, body: row.remarks || '', href: '/tracker' });
+    await sendNotificationEmail(poc.email, { title: `Reminder: ${label}`, body: row.remarks || '', href: '/tracker' }, undefined, { organizationId });
   }
   await notifyStaff(organizationId, { type: 'tracker', title: `Reminder: ${label}`, href: '/tracker', recipientUserIds: [row.poc], email: false });
   return `${poc.firstName} ${poc.lastName}`.trim();

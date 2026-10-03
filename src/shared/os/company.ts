@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Organization } from '../../models/Organization.js';
 import { COMPANY_PROFILE_FIELDS, NOTIFICATION_CATEGORIES, type NotificationCategory } from '../constants/os.js';
+import { encryptData, hasEncryptedSecret } from '../utils/crypto.js';
 
 export interface CompanyRecord {
   name?: string;
@@ -8,7 +9,8 @@ export interface CompanyRecord {
   profile?: Partial<Record<(typeof COMPANY_PROFILE_FIELDS)[number], string>>;
 }
 
-export const COMPANY_SELECT = 'name slug logo website industry profile notificationEmails';
+export const COMPANY_SELECT = 'name slug logo website industry profile notificationEmails smtp.enabled smtp.host smtp.port smtp.secure smtp.user smtp.fromName smtp.fromEmail';
+export const COMPANY_SMTP_SELECT = `${COMPANY_SELECT} +smtp.passCipher +smtp.passIv +smtp.passTag`;
 
 /** Seller block printed on invoices, taken from the company's own profile so tenants never see each other's GST or bank details. */
 export function companyProfile(org?: CompanyRecord | null) {
@@ -99,4 +101,70 @@ export function publicCompany(org: CompanyRecord & { website?: string; industry?
 
 export function publicNotificationEmails(org: { notificationEmails?: Partial<Record<NotificationCategory, string[]>> }) {
   return Object.fromEntries(NOTIFICATION_CATEGORIES.map((c) => [c, org.notificationEmails?.[c] ?? []])) as Record<NotificationCategory, string[]>;
+}
+
+export type SmtpRecord = {
+  smtp?: {
+    enabled?: boolean;
+    host?: string;
+    port?: number;
+    secure?: boolean;
+    user?: string;
+    fromName?: string;
+    fromEmail?: string;
+    passCipher?: string;
+    passIv?: string;
+    passTag?: string;
+  };
+};
+
+export function publicSmtp(org: SmtpRecord) {
+  const s = org.smtp || {};
+  return {
+    enabled: Boolean(s.enabled),
+    host: s.host || 'smtp.gmail.com',
+    port: Number(s.port) || 465,
+    secure: s.secure ?? true,
+    user: s.user || '',
+    fromName: s.fromName || '',
+    fromEmail: s.fromEmail || '',
+    passwordConfigured: hasEncryptedSecret({ cipher: s.passCipher, iv: s.passIv, tag: s.passTag }),
+  };
+}
+
+export const smtpSettingsSchema = z.object({
+  enabled: z.boolean(),
+  host: z.string().trim().min(1).max(200).default('smtp.gmail.com'),
+  port: z.coerce.number().int().min(1).max(65535).default(465),
+  secure: z.boolean().default(true),
+  user: z.string().trim().email('Enter a valid mailbox / SMTP username'),
+  fromName: z.string().trim().max(200).optional().default(''),
+  fromEmail: z.union([z.literal(''), z.string().trim().email()]).optional().default(''),
+  password: z.union([z.literal(''), z.string().trim().min(4).max(200)]).optional().default(''),
+});
+
+/** Builds `$set` for SMTP; password is encrypted and only written when provided. */
+export function smtpSettingsUpdate(input: z.infer<typeof smtpSettingsSchema>, actorEmail: string, alreadyConfigured: boolean) {
+  const set: Record<string, unknown> = {
+    'smtp.enabled': input.enabled,
+    'smtp.host': input.host,
+    'smtp.port': input.port,
+    'smtp.secure': input.secure,
+    'smtp.user': input.user.toLowerCase(),
+    'smtp.fromName': input.fromName || '',
+    'smtp.fromEmail': (input.fromEmail || input.user).toLowerCase(),
+    'smtp.updatedBy': actorEmail,
+    'smtp.updatedAt': new Date(),
+  };
+  const password = (input.password || '').trim();
+  if (password) {
+    const enc = encryptData(password);
+    if (!enc) throw new Error('Could not encrypt SMTP password');
+    set['smtp.passCipher'] = enc.cipher;
+    set['smtp.passIv'] = enc.iv;
+    set['smtp.passTag'] = enc.tag;
+  } else if (input.enabled && !alreadyConfigured) {
+    throw new Error('App password is required when enabling SMTP');
+  }
+  return set;
 }

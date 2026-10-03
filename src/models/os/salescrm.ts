@@ -4,6 +4,7 @@ import {
   SALES_EMPLOYEE_STATUSES, SALES_LEAD_SOURCES, SALES_LEAD_TEMPERATURES, SALES_LEAD_STATUSES,
   SALES_DEAL_STAGES, SALES_LOST_REASONS, SALES_CALL_OUTCOMES, SALES_MEETING_TYPES, SALES_MEETING_STATUSES,
   SALES_FOLLOWUP_TYPES, SALES_FOLLOWUP_STATUSES, SALES_QUOTATION_STATUSES, SALES_PROPOSAL_STATUSES,
+  SALES_CALL_STATUSES, SALES_CALL_CHANNELS, SALES_CALL_PROVIDERS, SALES_CALL_DURATION_SOURCES,
   SALES_TASK_STATUSES, SALES_APPROVAL_TYPES, SALES_APPROVAL_STATUSES, SALES_ATTENDANCE_STATUSES,
   SALES_TARGET_PERIODS, SALES_TERRITORY_TYPES, LEAD_PRIORITIES,
 } from '../../shared/constants/os.js';
@@ -101,13 +102,35 @@ const callSchema = osSchema({
   dealId: ref('SalesDeal'),
   employeeId: ref('SalesEmployee', { required: true, index: true }),
   calledAt: { type: Date, default: Date.now },
+  dialedAt: Date,
+  endedAt: Date,
+  /** Null when the CRM could not time the call. A tel: link never supplies a carrier duration. */
+  durationSeconds: { type: Number, default: null },
+  durationSource: oneOf(SALES_CALL_DURATION_SOURCES, 'unavailable'),
   durationMinutes: { type: Number, default: 0 },
-  outcome: oneOf(SALES_CALL_OUTCOMES, 'connected'),
+  outcome: { type: String, enum: [...SALES_CALL_OUTCOMES, ''], default: '' },
   notes: str(),
   nextAction: str(),
   nextFollowUpAt: Date,
+  /** E.164 number actually dialed, kept so history stays stable if the lead phone changes. */
+  phone: str(),
+  status: { type: String, enum: SALES_CALL_STATUSES, index: true },
+  channel: { type: String, enum: SALES_CALL_CHANNELS },
+  provider: oneOf(SALES_CALL_PROVIDERS, 'device_sim'),
 });
+callSchema.index({ organizationId: 1, employeeId: 1, status: 1, calledAt: -1 });
 export const SalesCall = osModel('SalesCall', callSchema);
+
+/** A signed-in handset that can place SIM calls for this employee. Not a telephony account. */
+const phoneLinkSchema = osSchema({
+  employeeId: ref('SalesEmployee', { required: true, index: true }),
+  userId: ref('User', { required: true }),
+  deviceId: { type: String, required: true, trim: true },
+  userAgent: str(),
+  lastSeenAt: { type: Date, default: Date.now, index: true },
+});
+phoneLinkSchema.index({ organizationId: 1, employeeId: 1, deviceId: 1 }, { unique: true });
+export const SalesPhoneLink = osModel('SalesPhoneLink', phoneLinkSchema);
 
 const meetingSchema = osSchema({
   title: { type: String, required: true, trim: true },
@@ -184,6 +207,8 @@ const taskSchema = osSchema({
   priority: oneOf(LEAD_PRIORITIES, 'medium'),
   dueDate: Date,
   status: oneOf(SALES_TASK_STATUSES, 'todo', { index: true }),
+  /** When set, this Sales task mirrors an agency Delivery task for the BDA portal. */
+  agencyTaskId: str({ index: true }),
 });
 export const SalesTask = osModel('SalesTask', taskSchema);
 
@@ -250,3 +275,18 @@ const activitySchema = osSchema({
 });
 activitySchema.index({ organizationId: 1, createdAt: -1 });
 export const SalesActivityEvent = osModel('SalesActivityEvent', activitySchema);
+
+const messageSchema = osSchema({
+  channel: oneOf(['email', 'whatsapp'] as const, 'email', { index: true }),
+  direction: oneOf(['outbound', 'inbound'] as const, 'outbound'),
+  leadId: ref('SalesLead', { index: true }),
+  dealId: ref('SalesDeal'),
+  employeeId: ref('SalesEmployee', { required: true, index: true }),
+  toAddress: str(),
+  subject: str(),
+  body: { type: String, required: true, trim: true },
+  status: oneOf(['logged', 'sent', 'failed'] as const, 'logged'),
+  sentAt: { type: Date, default: Date.now },
+});
+messageSchema.index({ organizationId: 1, sentAt: -1 });
+export const SalesMessage = osModel('SalesMessage', messageSchema);
