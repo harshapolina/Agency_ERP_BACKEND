@@ -6,6 +6,7 @@ export const DEFAULT_CORS_ORIGINS = [
   'http://localhost:3001',
   'https://dashboards.editcomedia.com',
   'https://dashboards-frontend.vercel.app',
+  'https://agency-erp-frontend.vercel.app',
 ];
 
 /** Parse comma-separated CORS_ORIGIN env value into a list of allowed origins. */
@@ -20,9 +21,12 @@ export function getAllowedOrigins(corsOriginEnv: string): string[] {
   return [...new Set([...DEFAULT_CORS_ORIGINS, ...parseCorsOrigins(corsOriginEnv)])];
 }
 
-/** Vercel preview URLs for the frontend project */
+/** Vercel preview URLs for the frontend projects */
 function isVercelPreviewOrigin(origin: string): boolean {
-  return /^https:\/\/dashboards-frontend[a-z0-9-]*\.vercel\.app$/i.test(origin);
+  return (
+    /^https:\/\/dashboards-frontend[a-z0-9-]*\.vercel\.app$/i.test(origin) ||
+    /^https:\/\/agency-erp-frontend[a-z0-9-]*\.vercel\.app$/i.test(origin)
+  );
 }
 
 export function createCorsOptions(corsOriginEnv: string): CorsOptions {
