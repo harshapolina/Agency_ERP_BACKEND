@@ -56,6 +56,15 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use('/uploads', express.static(path.resolve(env.UPLOAD_DIR)));
 
+app.get('/', (_req, res) => {
+  res.json({
+    success: true,
+    message: 'Agency ERP API',
+    health: '/api/health',
+    api: '/api/v1',
+  });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     success: true,
